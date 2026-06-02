@@ -1,0 +1,545 @@
+generator client {
+  provider             = "prisma-client-py"
+  output               = "../venv/Lib/site-packages/prisma"
+  recursive_type_depth = "5"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                   Int                  @id @default(autoincrement())
+  email                String               @unique
+  phone                String?              @unique
+  name                 String?
+  handle               String?              @unique
+  status               UserStatus           @default(PENDING)
+  tier                 String?              @default("Free")
+  matchRate            Int?                 @default(0)
+  isVerified           Boolean              @default(false)
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  password             String?
+  coins                Int                  @default(0)
+  
+  // Social Auth
+  socialProvider       String?
+  socialId             String?
+  
+  isShadowBanned       Boolean              @default(false)
+  stripeCustomerId     String?              @unique
+  stripeSubscriptionId String?              @unique
+  swipeLimit           Int                  @default(10)
+  blocksReceived       Block[]              @relation("BlocksTo")
+  blocksGiven          Block[]              @relation("BlocksFrom")
+  coinTransactions     CoinTransaction[]
+  conversations        ConversationMember[]
+  interactionsGiven    Interaction[]        @relation("InteractionsFrom")
+  interactionsReceived Interaction[]        @relation("InteractionsTo")
+  matchesAsUser1       Match[]              @relation("User1Matches")
+  matchesAsUser2       Match[]              @relation("User2Matches")
+  messages             Message[]
+  notifications        Notification[]
+  payments             Payment[]
+  photos               Photo[]
+  profile              Profile?
+  reportsMade          Report[]             @relation("ReportedBy")
+  reportsReceived      Report[]             @relation("ReportedTarget")
+  giftsReceived        SentGift[]           @relation("GiftsReceived")
+  giftsSent            SentGift[]           @relation("GiftsSent")
+  matchSettings        UserMatchSetting?
+  responses            UserResponse[]
+
+  @@unique([socialProvider, socialId])
+}
+
+model VerificationCode {
+  id         Int      @id @default(autoincrement())
+  identifier String   @unique // Email or Phone
+  code       String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+}
+
+model PasswordReset {
+  id        Int      @id @default(autoincrement())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Profile {
+  id              Int          @id @default(autoincrement())
+  userId          Int          @unique
+  bio             String?
+  birthDate       DateTime?
+  gender          Gender?
+  orientation     Orientation?
+  city            String?
+  country         String?
+  latitude        Float?
+  longitude       Float?
+  interestedIn    Gender[]
+  minAgePref      Int?         @default(18)
+  maxAgePref      Int?         @default(99)
+  maxDistance     Int?         @default(50)
+  datingIntention String?
+  
+  // New Fields for Discovery
+  occupation      String?
+  languages       String[]     @default([])
+  interests       String[]     @default([])
+  promptHopingYou String?
+  promptHeartWay  String?
+
+  drinking        String?
+  education       String?
+  exercise        String?
+  familyPlans     String?
+  haveKids        String?
+  height          Int?
+  religion        String?
+  showGender      Boolean?     @default(true)
+  smoking         String?
+  
+  // New Fields for Onboarding/Preferences
+  nickname        String?
+  openingMove     String?
+  openingMoveAnswers Json?    @default("{}")
+  
+  // Dating Preferences
+  verifiedOnlyPref Boolean?   @default(false)
+  languagesPref   String[]     @default([])
+  smokingPref     String?
+  drinkingPref    String?
+  interestsPref   String[]     @default([])
+  lat             Float?
+  lng             Float?
+
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Photo {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  url          String
+  isPrimary    Boolean  @default(false)
+  order        Int      @default(0)
+  isVerified   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  aiConfidence Float?
+  aiStatus     String   @default("PENDING")
+  aiReason     String?
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Interaction {
+  id         Int             @id @default(autoincrement())
+  fromUserId Int
+  toUserId   Int
+  type       InteractionType
+  createdAt  DateTime        @default(now())
+  fromUser   User            @relation("InteractionsFrom", fields: [fromUserId], references: [id])
+  toUser     User            @relation("InteractionsTo", fields: [toUserId], references: [id])
+
+  @@unique([fromUserId, toUserId])
+}
+
+model Match {
+  id           Int           @id @default(autoincrement())
+  user1Id      Int
+  user2Id      Int
+  score        Int?
+  status       MatchStatus   @default(ACTIVE)
+  createdAt    DateTime      @default(now())
+  conversation Conversation?
+  user1        User          @relation("User1Matches", fields: [user1Id], references: [id])
+  user2        User          @relation("User2Matches", fields: [user2Id], references: [id])
+
+  @@unique([user1Id, user2Id])
+}
+
+model Block {
+  id        Int      @id @default(autoincrement())
+  blockerId Int
+  blockedId Int
+  createdAt DateTime @default(now())
+  blocked   User     @relation("BlocksTo", fields: [blockedId], references: [id])
+  blocker   User     @relation("BlocksFrom", fields: [blockerId], references: [id])
+
+  @@unique([blockerId, blockedId])
+}
+
+model Report {
+  id          Int          @id @default(autoincrement())
+  reporterId  Int
+  targetId    Int
+  reason      String
+  description String?
+  status      ReportStatus @default(PENDING)
+  createdAt   DateTime     @default(now())
+  resolvedAt  DateTime?
+  reporter    User         @relation("ReportedBy", fields: [reporterId], references: [id])
+  target      User         @relation("ReportedTarget", fields: [targetId], references: [id])
+}
+
+model Conversation {
+  id        Int                  @id @default(autoincrement())
+  matchId   Int?                 @unique
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  match     Match?               @relation(fields: [matchId], references: [id])
+  members   ConversationMember[]
+  messages  Message[]
+}
+
+model ConversationMember {
+  id             Int          @id @default(autoincrement())
+  conversationId Int
+  userId         Int
+  lastReadAt     DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  user           User         @relation(fields: [userId], references: [id])
+
+  @@unique([conversationId, userId])
+}
+
+model Message {
+  id             Int          @id @default(autoincrement())
+  conversationId Int
+  senderId       Int
+  content        String
+  type           MessageType  @default(TEXT)
+  mediaUrl       String?
+  isRead         Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  sender         User         @relation(fields: [senderId], references: [id])
+}
+
+model QuestionnaireCategory {
+  id          Int        @id @default(autoincrement())
+  name        String     @unique
+  description String?
+  order       Int        @default(0)
+  createdAt   DateTime   @default(now())
+  imageUrl    String?
+  title       String?
+  questions   Question[]
+}
+
+model Question {
+  id         Int                   @id @default(autoincrement())
+  categoryId Int
+  text       String
+  type       QuestionType          @default(MULTIPLE_CHOICE)
+  isRequired Boolean               @default(true)
+  order      Int                   @default(0)
+  imageUrl   String?
+  createdAt  DateTime              @default(now())
+  category   QuestionnaireCategory @relation(fields: [categoryId], references: [id])
+  options    QuestionOption[]
+  responses  UserResponse[]
+}
+
+model QuestionOption {
+  id         Int            @id @default(autoincrement())
+  questionId Int
+  text       String
+  value      Int
+  tags       String[]       @default([])
+  imageUrl   String?
+  question   Question       @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  responses  UserResponse[]
+}
+
+model UserResponse {
+  id         Int            @id @default(autoincrement())
+  userId     Int
+  questionId Int
+  optionId   Int
+  createdAt  DateTime       @default(now())
+  option     QuestionOption @relation(fields: [optionId], references: [id])
+  question   Question       @relation(fields: [questionId], references: [id])
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, questionId])
+}
+
+model Payment {
+  id        Int           @id @default(autoincrement())
+  txId      String        @unique
+  amount    Float
+  netAmount Float
+  method    String
+  status    PaymentStatus @default(PENDING)
+  tier      String
+  createdAt DateTime      @default(now())
+  userId    Int
+  user      User          @relation(fields: [userId], references: [id])
+}
+
+model SubscriptionPlan {
+  id            Int           @id @default(autoincrement())
+  name          String        @unique
+  price         Float
+  duration      String
+  isActive      Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  description   String?
+  durationValue Int           @default(1)
+  stripePriceId String?       @unique
+  dailySwipes   Int           @default(10)
+  features      PlanFeature[]
+}
+
+model PlanFeature {
+  id          Int              @id @default(autoincrement())
+  planId      Int
+  name        String
+  description String?
+  iconUrl     String?
+  plan        SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+}
+
+model UserMatchSetting {
+  id          Int     @id @default(autoincrement())
+  userId      Int     @unique
+  dailyLimit  Int     @default(10)
+  prefRadius  Int     @default(50)
+  autoApprove Boolean @default(false)
+  user        User    @relation(fields: [userId], references: [id])
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  message   String
+  type      String
+  status    String   @default("PENDING")
+  recipient String
+  userId    Int?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id])
+}
+
+model VerificationDocument {
+  id        Int                @id @default(autoincrement())
+  userId    Int
+  type      String
+  fileUrl   String
+  status    VerificationStatus @default(PENDING)
+  adminNote String?
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+}
+
+model LegalPolicy {
+  id        Int      @id @default(autoincrement())
+  slug      String   @unique
+  title     String
+  content   String
+  version   String
+  isActive  Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+}
+
+model FAQ {
+  id       Int     @id @default(autoincrement())
+  question String
+  answer   String
+  category String?
+  order    Int     @default(0)
+  isActive Boolean @default(true)
+}
+
+model AdminProfile {
+  id               Int       @id @default(autoincrement())
+  name             String
+  email            String    @unique
+  role             String
+  status           String    @default("Offline")
+  lastActive       DateTime  @default(now())
+  password         String?
+  avatar           String?
+  resetToken       String?
+  resetTokenExpiry DateTime?
+}
+
+model AuditLog {
+  id          Int         @id @default(autoincrement())
+  adminName   String
+  action      String
+  module      String
+  impact      ImpactLevel @default(LOW)
+  description String?
+  createdAt   DateTime    @default(now())
+}
+
+model PlatformSetting {
+  id               Int      @id @default(1)
+  platformName     String   @default("Partner4Luv")
+  tagline          String?  @default("Find your perfect connection")
+  logoUrl          String?
+  holidayMode      Boolean  @default(false)
+  holidayLogo      String?
+  metaTitle        String?  @default("Partner4Luv | %s")
+  metaKeywords     String?  @default("dating, connection, premium matching")
+  metaDescription  String?  @default("The world's leading connection platform for meaningful relationships.")
+  announcement     String?
+  updatedAt        DateTime @updatedAt
+  maintenanceMode  Boolean  @default(false)
+  faviconUrl       String?
+  averageMatch     Int      @default(55)
+  excellentMatch   Int      @default(90)
+  goodMatch        Int      @default(75)
+  minCompatibility Int      @default(85)
+}
+
+model Policy {
+  id        Int      @id @default(autoincrement())
+  type      String   @unique
+  title     String
+  content   String
+  updatedAt DateTime @updatedAt
+}
+
+model VirtualItem {
+  id        Int        @id @default(autoincrement())
+  name      String
+  type      ItemType   @default(GIFT)
+  price     Int
+  imageUrl  String
+  isActive  Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  sentGifts SentGift[]
+}
+
+model CoinPackage {
+  id            Int      @id @default(autoincrement())
+  name          String
+  coins         Int
+  price         Float
+  currency      String   @default("USD")
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  stripePriceId String?  @unique
+}
+
+model CoinTransaction {
+  id          Int             @id @default(autoincrement())
+  userId      Int
+  amount      Int
+  type        TransactionType
+  description String?
+  referenceId String?
+  createdAt   DateTime        @default(now())
+  user        User            @relation(fields: [userId], references: [id])
+}
+
+model SentGift {
+  id         Int         @id @default(autoincrement())
+  senderId   Int
+  receiverId Int
+  itemId     Int
+  coinPrice  Int
+  createdAt  DateTime    @default(now())
+  item       VirtualItem @relation(fields: [itemId], references: [id])
+  receiver   User        @relation("GiftsReceived", fields: [receiverId], references: [id])
+  sender     User        @relation("GiftsSent", fields: [senderId], references: [id])
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+  PENDING
+  SUSPENDED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  NON_BINARY
+  TRANSGENDER
+  OTHER
+}
+
+enum Orientation {
+  STRAIGHT
+  GAY
+  LESBIAN
+  BISEXUAL
+  PANSEXUAL
+  ASEXUAL
+  OTHER
+}
+
+enum InteractionType {
+  LIKE
+  SUPERLIKE
+  DISLIKE
+}
+
+enum MatchStatus {
+  ACTIVE
+  UNMATCHED
+  BLOCKED
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWING
+  RESOLVED
+  DISMISSED
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  GIFT
+  STICKER
+}
+
+enum QuestionType {
+  SINGLE_CHOICE
+  MULTIPLE_CHOICE
+  VISUAL_PIE
+  VISUAL_PATTERN
+  VISUAL_IMAGE
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  FLAGGED
+}
+
+enum PaymentStatus {
+  SUCCESSFUL
+  PENDING
+  FAILED
+  REFUNDED
+}
+
+enum ImpactLevel {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum ItemType {
+  STICKER
+  GIFT
+}
+
+enum TransactionType {
+  PURCHASE
+  GIFT_SENT
+  GIFT_RECEIVED
+  ADMIN_ADJUSTMENT
+}
