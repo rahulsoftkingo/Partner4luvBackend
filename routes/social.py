@@ -19,19 +19,33 @@ async def startup():
 @router.post("/interact")
 async def interact(data: InteractionRequest):
     if data.fromUserId == data.toUserId:
-        raise HTTPException(status_code=400, detail="Cannot interact with yourself")
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot interact with yourself"
+        )
 
     # 1. Enforce Swipe Limits based on User's Persistent Limit
-    user = await db.user.find_unique(where={"id": data.fromUserId})
+    user = await db.user.find_unique(
+        where={"id": data.fromUserId}
+    )
+
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    # We use user.swipeLimit which is a snapshot of their plan's limit.
-    # This provides 100% safety even if the plan is deleted or renamed later.
+        raise HTTPException(
+            status_code=404,
+            detail="User not found"
+        )
+
+    # Use stored swipe limit or default
     limit = user.swipeLimit if user.swipeLimit is not None else 10
-    
-    # Count today's LIKES/SUPERLIKES
-    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Count today's likes/superlikes
+    today = datetime.now(timezone.utc).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0
+    )
+
     swipe_count = await db.interaction.count(
         where={
             "fromUserId": data.fromUserId,
@@ -39,10 +53,10 @@ async def interact(data: InteractionRequest):
             "createdAt": {"gte": today}
         }
     )
-    
+
     if swipe_count >= limit:
         raise HTTPException(
-            status_code=403, 
+            status_code=403,
             detail=f"Daily swipe limit reached ({limit}). Upgrade to Premium for unlimited swipes!"
         )
 
@@ -66,40 +80,89 @@ async def interact(data: InteractionRequest):
         }
     )
 
-    # 2. Check for Match (If both liked/superliked each other)
-    if data.type in ["LIKE", "SUPERLIKE"]:
-        reverse_interaction = await db.interaction.find_unique(
+    # 3. Handle DISLIKE immediately
+    if data.type == "DISLIKE":
+        return {
+            "message": "Interaction saved",
+            "isMatch": False,
+            "reason": "You disliked this profile"
+        }
+
+    # 4. Check reverse interaction for LIKE/SUPERLIKE
+    reverse_interaction = await db.interaction.find_unique(
+        where={
+            "fromUserId_toUserId": {
+                "fromUserId": data.toUserId,
+                "toUserId": data.fromUserId
+            }
+        }
+    )
+
+    # No reverse interaction yet
+    if not reverse_interaction:
+        return {
+            "message": "Interaction saved",
+            "isMatch": False,
+            "reason": "Waiting for the other user to like you back"
+        }
+
+    # Reverse interaction exists but is DISLIKE
+    if reverse_interaction.type == "DISLIKE":
+        return {
+            "message": "Interaction saved",
+            "isMatch": False,
+            "reason": "The other user has not liked your profile"
+        }
+
+    # Mutual LIKE / SUPERLIKE => Match
+    if reverse_interaction.type in ["LIKE", "SUPERLIKE"]:
+
+        match = await db.match.upsert(
             where={
-                "fromUserId_toUserId": {
-                    "fromUserId": data.toUserId,
-                    "toUserId": data.fromUserId
+                "user1Id_user2Id": {
+                    "user1Id": min(
+                        data.fromUserId,
+                        data.toUserId
+                    ),
+                    "user2Id": max(
+                        data.fromUserId,
+                        data.toUserId
+                    )
+                }
+            },
+            data={
+                "create": {
+                    "user1Id": min(
+                        data.fromUserId,
+                        data.toUserId
+                    ),
+                    "user2Id": max(
+                        data.fromUserId,
+                        data.toUserId
+                    ),
+                    "status": "ACTIVE"
+                },
+                "update": {
+                    "status": "ACTIVE"
                 }
             }
         )
 
-        if reverse_interaction and reverse_interaction.type in ["LIKE", "SUPERLIKE"]:
-            # It's a match!
-            await db.match.upsert(
-                where={
-                    "user1Id_user2Id": {
-                        "user1Id": min(data.fromUserId, data.toUserId),
-                        "user2Id": max(data.fromUserId, data.toUserId)
-                    }
-                },
-                data={
-                    "create": {
-                        "user1Id": min(data.fromUserId, data.toUserId),
-                        "user2Id": max(data.fromUserId, data.toUserId),
-                        "status": "ACTIVE"
-                    },
-                    "update": {
-                        "status": "ACTIVE"
-                    }
-                }
-            )
-            return {"message": "Interaction saved", "isMatch": True}
+        return {
+            "message": "Interaction saved",
+            "isMatch": True,
+            "reason": "Both users liked each other",
+            "matchId": match.id
+        }
 
-    return {"message": "Interaction saved", "isMatch": False}
+    # Fallback
+    return {
+        "message": "Interaction saved",
+        "isMatch": False,
+        "reason": "Match conditions not satisfied"
+    }
+
+
 
 @router.get("/matches/{user_id}")
 async def get_user_matches(user_id: int):
