@@ -257,7 +257,26 @@ async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):
         },
         take=100
     )
+    
 
+    print(f"Found {len(candidates)} candidates before scoring and distance filtering", end="\n")
+    print(candidates)
+     
+    recommendations = []
+
+    for user in candidates:
+        recommendations.append({
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "matchRate": user.matchRate,
+            "profile": {
+                "city": user.profile.city,
+                "country": user.profile.country,
+                "bio": user.profile.bio,
+                "gender": user.profile.gender,
+            }
+        })
     # 5. Distance Calculation & Scoring
     scored_candidates = []
     
@@ -315,7 +334,7 @@ async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):
             item["user"].profile.promptHeartWay = "*** Hidden ***"
     
     return {
-        "recommendations": final_list,
+        "recommendations": recommendations,
         "total": len(scored_candidates),
         "userTier": user.tier
     }
