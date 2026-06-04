@@ -262,21 +262,21 @@ async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):
     print(f"Found {len(candidates)} candidates before scoring and distance filtering", end="\n")
     print(candidates)
      
-    recommendations = []
+    # recommendations = []
 
-    for user in candidates:
-        recommendations.append({
-            "id": user.id,
-            "name": user.name,
-            "email": user.email,
-            "matchRate": user.matchRate,
-            "profile": {
-                "city": user.profile.city,
-                "country": user.profile.country,
-                "bio": user.profile.bio,
-                "gender": user.profile.gender,
-            }
-        })
+    # for user in candidates:
+    #     recommendations.append({
+    #         "id": user.id,
+    #         "name": user.name,
+    #         "email": user.email,
+    #         "matchRate": user.matchRate,
+    #         "profile": {
+    #             "city": user.profile.city,
+    #             "country": user.profile.country,
+    #             "bio": user.profile.bio,
+    #             "gender": user.profile.gender,
+    #         }
+    #     })
     # 5. Distance Calculation & Scoring
     scored_candidates = []
     
@@ -295,6 +295,7 @@ async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):
     for cand in candidates:
         if not cand.profile: continue
         
+        print(f"Show latitude and longitude for p and cand {cand.profile.lat} - {cand.profile.lng}-{p.lat} - {p.lng}", end="\n")
         # Distance Filter
         dist = calculate_distance(p.lat, p.lng, cand.profile.lat, cand.profile.lng)
         if p.maxDistance and dist > p.maxDistance:
@@ -334,7 +335,7 @@ async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):
             item["user"].profile.promptHeartWay = "*** Hidden ***"
     
     return {
-        "recommendations": recommendations,
+        "recommendations": final_list,
         "total": len(scored_candidates),
         "userTier": user.tier
     }
