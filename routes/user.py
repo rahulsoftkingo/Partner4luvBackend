@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from typing import Optional, List
 from pydantic import BaseModel
 from auth_utils import get_password_hash, verify_password, create_access_token
@@ -430,22 +430,58 @@ async def get_user_profile(user_id: int, requester_id: Optional[int] = None):
         "personalityInsight": insight
     }
 
-@router.post("/update/{user_id}")
-async def update_user(user_id: int, data: UserUpdateRequest):
-    update_data = {}
-    if data.name is not None: update_data["name"] = data.name
-    if data.phone is not None: update_data["phone"] = data.phone
-    if data.status is not None: update_data["status"] = data.status
-    if data.isShadowBanned is not None: update_data["isShadowBanned"] = data.isShadowBanned
 
+@router.post("/updatephotos/{user_id}")
+async def update_user(user_id: int,photos: List[UploadFile] = File(None)):
+    update_data = {}
     try:
-        user = await db.user.update(
-            where={"id": user_id},
-            data=update_data
-        )
-        return {"message": "User updated", "user": user}
+        # 2. handle photos separately (RELATION WAY)
+        if photos and len(photos) > 0:
+
+            # delete old photos
+            await db.photo.delete_many(
+                where={"userId": user_id}
+            )
+
+            # create new photos
+            for index, photo in enumerate(photos):
+
+                file_path = f"uploads/{user_id}_{photo.filename}"
+
+                with open(file_path, "wb") as buffer:
+                    buffer.write(await photo.read())
+
+                await db.photo.create(
+                    data={
+                        "userId": user_id,
+                        "url": file_path,
+                        "isPrimary": index == 0,
+                        "order": index
+                    }
+                )
+
+        return {
+            "message": "User photos updated successfully",
+        }
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+# @router.post("/update/{user_id}")
+# async def update_user(user_id: int, data: UserUpdateRequest):
+#     update_data = {}
+#     if data.name is not None: update_data["name"] = data.name
+#     if data.phone is not None: update_data["phone"] = data.phone
+#     if data.status is not None: update_data["status"] = data.status
+#     if data.isShadowBanned is not None: update_data["isShadowBanned"] = data.isShadowBanned
+
+#     try:
+#         user = await db.user.update(
+#             where={"id": user_id},
+#             data=update_data
+#         )
+#         return {"message": "User updated", "user": user}
+#     except Exception as e:
+#         raise HTTPException(status_code=400, detail=str(e))
 
 @router.delete("/delete/{user_id}")
 async def delete_user(user_id: int):
@@ -650,6 +686,23 @@ async def setup_profile(data: ProfileSetupRequest):
     
     return {"message": "Profile and photos updated", "profile": profile}
 
+
+@router.get("/photos/{user_id}")
+async def get_user_photos(user_id: int):
+    try:
+        photos = await db.photo.find_many(
+            where={"userId": user_id},
+            order={"order": "asc"}
+        )
+
+        return {
+            "message": "Photos fetched successfully",
+            "userId": user_id,
+            "photos": photos
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/logout")
 async def user_logout():
