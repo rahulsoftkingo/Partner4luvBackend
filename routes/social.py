@@ -208,9 +208,10 @@ async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):
     p = user.profile
     user_tags = set()
     for resp in user.responses:
-        if resp.option.tags:
-            user_tags.update(resp.option.tags)
-
+        # Safely get tags if they exist on the option object
+        tags = getattr(resp.option, "tags", None)
+        if tags:
+            user_tags.update(tags)
     # 2. Exclude already interacted users
     interacted = await db.interaction.find_many(where={"fromUserId": user_id})
     interacted_ids = [i.toUserId for i in interacted]
@@ -258,9 +259,6 @@ async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):
         take=100
     )
     
-
-    print(f"Found {len(candidates)} candidates before scoring and distance filtering", end="\n")
-    print(candidates)
      
     # recommendations = []
 
