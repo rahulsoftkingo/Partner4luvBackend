@@ -162,7 +162,33 @@ async def interact(data: InteractionRequest):
         "reason": "Match conditions not satisfied"
     }
 
-
+@router.get("/interests/{user_id}")
+async def get_user_matches(user_id: int):
+    matches = await db.match.find_many(
+        where={
+            "OR": [
+                {"user1Id": user_id},
+                {"user2Id": user_id}
+            ],
+            "status": "ACTIVE"
+        },
+        include={
+            "user1": {"include": {"profile": True, "photos": True}},
+            "user2": {"include": {"profile": True, "photos": True}}
+        }
+    )
+    
+    # Format matches to return the OTHER user
+    result = []
+    for m in matches:
+        other_user = m.user2 if m.user1Id == user_id else m.user1
+        result.append({
+            "matchId": m.id,
+            "user": other_user,
+            "matchedAt": m.createdAt
+        })
+        
+    return {"matches": result}
 
 @router.get("/matches/{user_id}")
 async def get_user_matches(user_id: int):
@@ -253,7 +279,8 @@ async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):
         },
         include={
             "profile": True, 
-            "photos": {"where": {"aiStatus": "VERIFIED"}, "take": 5},
+            # "photos": {"where": {"aiStatus": "VERIFIED"}, "take": 5},
+            "photos": {"take": 5},
             "responses": {"include": {"option": True}}
         },
         take=100

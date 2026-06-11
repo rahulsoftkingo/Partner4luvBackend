@@ -7,6 +7,7 @@ from prisma import Json
 import secrets
 from datetime import datetime, timedelta, timezone
 from ai_insights import generate_match_insight, calculate_match_score
+from typing import Union, List
 
 router = APIRouter(prefix="/user", tags=["mobile"])
 
@@ -35,9 +36,10 @@ class UserUpdateRequest(BaseModel):
     status: Optional[str] = None
     isShadowBanned: Optional[bool] = None
 
+
 class UserResponseItem(BaseModel):
     questionId: int
-    optionId: int
+    optionId: Union[int, List[int]]
 
 class UserResponsesRequest(BaseModel):
     userId: int
@@ -355,7 +357,7 @@ async def complete_signup(data: CompleteSignupRequest):
         await db.verificationcode.delete(where={"id": verify.id})
         
         token = create_access_token(data={"sub": data.identifier, "role": "user"})
-        return {"message": "Account created successfully", "access_token": token, "user": user}
+        return {"message": "Account created successfully", "access_token": token, "user_id": user.id}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -584,25 +586,13 @@ async def get_onboarding_questions():
 
 @router.post("/onboarding/responses")
 async def save_responses(data: UserResponsesRequest):
-    # 1. Delete existing responses for these questions to avoid duplicates
     question_ids = [r.questionId for r in data.responses]
-    await db.userresponse.delete_many(
-        where={
-            "userId": data.userId,
-            "questionId": {"in": question_ids}
-        }
-    )
-
-    # 2. Create new responses
+    await db.userresponse.delete_many(where={"userId": data.userId,"questionId": {"in": question_ids}})
     for item in data.responses:
-        await db.userresponse.create(
-            data={
-                "userId": data.userId,
-                "questionId": item.questionId,
-                "optionId": item.optionId
-            }
-        )
-    
+        option_ids = item.optionId if isinstance(item.optionId, list) else [item.optionId]
+        for oid in option_ids:
+            await db.userresponse.create(data={"userId": data.userId,"questionId": item.questionId,"optionId": oid})
+
     return {"message": "Responses saved successfully"}
 
 @router.post("/profile/setup")

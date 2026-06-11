@@ -23,15 +23,12 @@ model User {
   updatedAt            DateTime             @updatedAt
   password             String?
   coins                Int                  @default(0)
-  
-  // Social Auth
-  socialProvider       String?
-  socialId             String?
-  
   isShadowBanned       Boolean              @default(false)
   stripeCustomerId     String?              @unique
   stripeSubscriptionId String?              @unique
   swipeLimit           Int                  @default(10)
+  socialId             String?
+  socialProvider       String?
   blocksReceived       Block[]              @relation("BlocksTo")
   blocksGiven          Block[]              @relation("BlocksFrom")
   coinTransactions     CoinTransaction[]
@@ -57,7 +54,7 @@ model User {
 
 model VerificationCode {
   id         Int      @id @default(autoincrement())
-  identifier String   @unique // Email or Phone
+  identifier String   @unique
   code       String
   expiresAt  DateTime
   createdAt  DateTime @default(now())
@@ -72,54 +69,46 @@ model PasswordReset {
 }
 
 model Profile {
-  id              Int          @id @default(autoincrement())
-  userId          Int          @unique
-  bio             String?
-  birthDate       DateTime?
-  gender          Gender?
-  orientation     Orientation?
-  city            String?
-  country         String?
-  latitude        Float?
-  longitude       Float?
-  interestedIn    Gender[]
-  minAgePref      Int?         @default(18)
-  maxAgePref      Int?         @default(99)
-  maxDistance     Int?         @default(50)
-  datingIntention String?
-  
-  // New Fields for Discovery
-  occupation      String?
-  languages       String[]     @default([])
-  interests       String[]     @default([])
-  promptHopingYou String?
-  promptHeartWay  String?
-
-  drinking        String?
-  education       String?
-  exercise        String?
-  familyPlans     String?
-  haveKids        String?
-  height          Int?
-  religion        String?
-  showGender      Boolean?     @default(true)
-  smoking         String?
-  
-  // New Fields for Onboarding/Preferences
-  nickname        String?
-  openingMove     String?
-  openingMoveAnswers Json?    @default("{}")
-  
-  // Dating Preferences
-  verifiedOnlyPref Boolean?   @default(false)
-  languagesPref   String[]     @default([])
-  smokingPref     String?
-  drinkingPref    String?
-  interestsPref   String[]     @default([])
-  lat             Float?
-  lng             Float?
-
-  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                 Int          @id @default(autoincrement())
+  userId             Int          @unique
+  bio                String?
+  birthDate          DateTime?
+  gender             Gender?
+  orientation        Orientation?
+  city               String?
+  country            String?
+  latitude           Float?
+  longitude          Float?
+  interestedIn       Gender[]
+  minAgePref         Int?         @default(18)
+  maxAgePref         Int?         @default(99)
+  maxDistance        Int?         @default(50)
+  datingIntention    String?
+  drinking           String?
+  education          String?
+  exercise           String?
+  familyPlans        String?
+  haveKids           String?
+  height             Int?
+  religion           String?
+  showGender         Boolean?     @default(true)
+  smoking            String?
+  interests          String[]     @default([])
+  languages          String[]     @default([])
+  occupation         String?
+  promptHeartWay     String?
+  promptHopingYou    String?
+  drinkingPref       String?
+  interestsPref      String[]     @default([])
+  languagesPref      String[]     @default([])
+  nickname           String?
+  openingMove        String?
+  openingMoveAnswers Json?        @default("{}")
+  smokingPref        String?
+  verifiedOnlyPref   Boolean?     @default(false)
+  lat                Float?
+  lng                Float?
+  user               User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Photo {
@@ -154,6 +143,7 @@ model Match {
   user2Id      Int
   score        Int?
   status       MatchStatus   @default(ACTIVE)
+  complimentMessage String?  @db.Text
   createdAt    DateTime      @default(now())
   conversation Conversation?
   user1        User          @relation("User1Matches", fields: [user1Id], references: [id])
@@ -214,8 +204,8 @@ model Message {
   content        String
   type           MessageType  @default(TEXT)
   mediaUrl       String?
-  isRead         Boolean      @default(false)
   createdAt      DateTime     @default(now())
+  isRead         Boolean      @default(false)
   conversation   Conversation @relation(fields: [conversationId], references: [id])
   sender         User         @relation(fields: [senderId], references: [id])
 }
@@ -238,8 +228,8 @@ model Question {
   type       QuestionType          @default(MULTIPLE_CHOICE)
   isRequired Boolean               @default(true)
   order      Int                   @default(0)
-  imageUrl   String?
   createdAt  DateTime              @default(now())
+  imageUrl   String?
   category   QuestionnaireCategory @relation(fields: [categoryId], references: [id])
   options    QuestionOption[]
   responses  UserResponse[]
@@ -250,8 +240,8 @@ model QuestionOption {
   questionId Int
   text       String
   value      Int
-  tags       String[]       @default([])
   imageUrl   String?
+  tags       String[]       @default([])
   question   Question       @relation(fields: [questionId], references: [id], onDelete: Cascade)
   responses  UserResponse[]
 }
@@ -266,7 +256,7 @@ model UserResponse {
   question   Question       @relation(fields: [questionId], references: [id])
   user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, questionId])
+  @@unique([userId, questionId, optionId], map: "unique_user_question_option")
 }
 
 model Payment {
