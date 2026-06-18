@@ -11,8 +11,7 @@ from pydantic import BaseModel
 from auth_utils import (
     create_access_token,
     get_password_hash,
-    verify_password,
-    verify_refresh_token,
+    verify_password
 )
 from db import db
 from prisma import Json
@@ -426,31 +425,31 @@ async def delete_user(user_id: int):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/refresh")
-async def refresh_token(request: Request):
-    refresh_token = request.cookies.get("refresh_token")
+# @router.post("/refresh")
+# async def refresh_token(request: Request):
+#     refresh_token = request.cookies.get("refresh_token")
 
-    if not refresh_token:
-        raise HTTPException(status_code=401, detail="Refresh token missing")
+#     if not refresh_token:
+#         raise HTTPException(status_code=401, detail="Refresh token missing")
 
-    try:
-        # FIX: Assumes verify_refresh_token logic is imported successfully
-        payload = verify_refresh_token(refresh_token)
+#     try:
+#         # FIX: Assumes verify_refresh_token logic is imported successfully
+#         payload = verify_refresh_token(refresh_token)
 
-        user_id = payload.get("user_id")
-        email_or_phone = payload.get("sub")
-        role = payload.get("role", "user")
+#         user_id = payload.get("user_id")
+#         email_or_phone = payload.get("sub")
+#         role = payload.get("role", "user")
 
-        new_access_token = create_access_token(
-            data={"sub": email_or_phone, "user_id": user_id, "role": role}
-        )
+#         new_access_token = create_access_token(
+#             data={"sub": email_or_phone, "user_id": user_id, "role": role}
+#         )
 
-        return {"access_token": new_access_token, "token_type": "bearer"}
+#         return {"access_token": new_access_token, "token_type": "bearer"}
 
-    except Exception:
-        raise HTTPException(
-            status_code=401, detail="Invalid or expired refresh token"
-        )
+#     except Exception:
+#         raise HTTPException(
+#             status_code=401, detail="Invalid or expired refresh token"
+#         )
 
 
 @router.post("/logout")
