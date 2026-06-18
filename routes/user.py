@@ -252,7 +252,6 @@ async def social_login(data: SocialLoginRequest):
     token = create_access_token(data={"sub": str(user.id), "role": "user"})
     return {"access_token": token, "token_type": "bearer", "user": user}
 
-
 @router.post("/forgot-password")
 async def forgot_password(data: ForgotPasswordRequest):
     user = await db.user.find_unique(where={"email": data.email})
@@ -279,7 +278,6 @@ async def forgot_password(data: ForgotPasswordRequest):
     print(f"DEBUG: Password reset token for {data.email} is {token}")
     return {"message": "Reset code sent to your email.", "debug_token": token}
 
-
 @router.post("/reset-password")
 async def reset_password(data: ResetPasswordRequest):
     reset = await db.passwordreset.find_unique(where={"token": data.token})
@@ -296,7 +294,6 @@ async def reset_password(data: ResetPasswordRequest):
 
     await db.passwordreset.delete(where={"id": reset.id})
     return {"message": "Password reset successful"}
-
 
 @router.post("/signup/otp")
 async def request_signup_otp(data: OTPRequest):
@@ -397,6 +394,73 @@ async def get_users():
     users = await db.user.find_many(include={"photos": True, "profile": True})
     return {"users": users}
 
+@router.get("/{user_id}")
+async def get_user_profile(user_id: int, requester_id: Optional[int] = None):
+    user = await db.user.find_unique(
+        where={"id": user_id}, 
+        include={
+            "profile": True, 
+            "photos": True,
+            "responses": {
+                "include": {
+                    "question": True,
+                    "option": True
+                }
+            },
+            "payments": {
+                "orderBy": {"createdAt": "desc"},
+                "take": 5
+            },
+            "interactionsGiven": {
+                "include": {"toUser": True},
+                "orderBy": {"createdAt": "desc"},
+                "take": 10
+            },
+            "giftsSent": {
+                "include": {
+                    "item": True,
+                    "receiver": True
+                },
+                "orderBy": {"createdAt": "desc"},
+                "take": 5
+            },
+            "reportsReceived": {
+                "include": {"reporter": True},
+                "orderBy": {"createdAt": "desc"}
+            }
+        }
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Generate AI Insight if requester is Premium
+    insight = None
+    if requester_id:
+        requester = await db.user.find_unique(
+            where={"id": requester_id},
+            include={"responses": {"include": {"option": True}}}
+        )
+        if requester and requester.tier != "Free":
+            # Extract tags for both
+            req_tags = []
+            for r in requester.responses:
+                if r.option and r.option.tags: req_tags.extend(r.option.tags)
+            
+            user_tags = []
+            for r in user.responses:
+                if r.option and r.option.tags: user_tags.extend(r.option.tags)
+            
+            insight = {
+                "score": calculate_match_score(req_tags, user_tags),
+                "text": await generate_match_insight({"tags": req_tags}, {"tags": user_tags})
+            }
+
+    return {
+        "user": user,
+        "personalityInsight": insight
+    }
+
+
 
 @router.post("/updatephotos/{user_id}")
 async def update_user(user_id: int,photos: List[UploadFile] = File(None)):
@@ -455,6 +519,92 @@ async def delete_user(user_id: int):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/{user_id}/matches")
+async def get_matches(user_id: int):
+    # 1. Get target user, their responses (with tags), and their profile
+    user = await db.user.find_unique(
+        where={"id": user_id},
+        include={
+            "responses": {"include": {"option": True}},
+            "profile": True
+        }
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Collect user's tags
+    user_tags = set()
+    for r in user.responses:
+        if r.option and r.option.tags:
+            user_tags.update(r.option.tags)
+    
+    # 2. Get all other active users with their responses (with tags) and profiles
+    others = await db.user.find_many(
+        where={
+            "id": {"not": user_id}, 
+            "status": "ACTIVE",
+            "isShadowBanned": False
+        },
+        include={
+            "responses": {"include": {"option": True}},
+            "profile": True,
+            "photos": {"where": {"isPrimary": True}}
+        }
+    )
+    
+    matches = []
+    
+    for other in others:
+        # TIER 1: BASIC INFO FILTERING (Priority)
+        if user.profile and other.profile:
+            # Simple Gender Filtering (If user is male, only show those interested in males, etc.)
+            # This is a basic filter for the preview
+            pass 
+
+        # TIER 2: TAG-BASED SIMILARITY
+        other_tags = set()
+        for r in other.responses:
+            if r.option and r.option.tags:
+                other_tags.update(r.option.tags)
+        
+        # Calculate Jaccard Similarity for Tags
+        intersection = user_tags.intersection(other_tags)
+        union = user_tags.union(other_tags)
+        
+        tag_score = (len(intersection) / len(union) * 100) if union else 0
+        
+        # Exact Question Match Bonus (Legacy Support)
+        exact_match_count = 0
+        user_res_dict = {r.questionId: r.optionId for r in user.responses}
+        for r in other.responses:
+            if user_res_dict.get(r.questionId) == r.optionId:
+                exact_match_count += 1
+        
+        # Final Score Calculation
+        # Tags contribute 70%, Exact matches contribute 30%
+        final_rate = round((tag_score * 0.7) + (min(exact_match_count * 10, 30)))
+        
+        # Add to results if there is some common ground
+        if len(intersection) > 0 or exact_match_count > 0:
+            matches.append({
+                "id": other.id,
+                "name": other.name,
+                "handle": other.handle,
+                "matchRate": min(final_rate, 100),
+                "matchConfidence": "HIGH" if final_rate >= 80 else "MEDIUM" if final_rate >= 50 else "LOW",
+                "profile": other.profile,
+                "avatarUrl": other.photos[0].url if other.photos else None,
+                "commonTags": list(intersection)[:5] # For UI transparency
+            })
+        
+    # Sort by match rate descending
+    matches.sort(key=lambda x: x["matchRate"], reverse=True)
+    
+    return {"matches": matches[:20]} # Top 20 matches
+
+
+
+
 # @router.post("/refresh")
 # async def refresh_token(request: Request):
 #     refresh_token = request.cookies.get("refresh_token")
@@ -481,6 +631,109 @@ async def delete_user(user_id: int):
 #             status_code=401, detail="Invalid or expired refresh token"
 #         )
 
+@router.get("/onboarding/questions")
+async def get_onboarding_questions():
+    categories = await db.questionnairecategory.find_many(
+        include={"questions": {"include": {"options": True}}},
+        order={"order": "asc"}
+    )
+    return {"categories": categories}
+
+@router.post("/onboarding/responses")
+async def save_responses(data: UserResponsesRequest):
+    question_ids = [r.questionId for r in data.responses]
+    await db.userresponse.delete_many(where={"userId": data.userId,"questionId": {"in": question_ids}})
+    for item in data.responses:
+        option_ids = item.optionId if isinstance(item.optionId, list) else [item.optionId]
+        for oid in option_ids:
+            await db.userresponse.create(data={"userId": data.userId,"questionId": item.questionId,"optionId": oid})
+
+    return {"message": "Responses saved successfully"}
+
+
+
+@router.post("/profile/setup")
+async def setup_profile(data: ProfileSetupRequest):
+    from datetime import datetime
+    
+    profile_data = {
+        "bio": data.bio,
+        "city": data.city,
+        "country": data.country,
+        "height": data.height,
+        "education": data.education,
+        "datingIntention": data.datingIntention,
+        "religion": data.religion,
+        "familyPlans": data.familyPlans,
+        "haveKids": data.haveKids,
+        "showGender": data.showGender,
+        "exercise": data.exercise,
+        "drinking": data.drinking,
+        "smoking": data.smoking,
+        
+        # New Fields
+        "occupation": data.occupation,
+        "languages": data.languages if data.languages is not None else [],
+        "interests": data.interests if data.interests is not None else [],
+        "promptHopingYou": data.promptHopingYou,
+        "promptHeartWay": data.promptHeartWay,
+
+        # Onboarding/Preferences Missing Fields
+        "nickname": data.nickname,
+        "openingMove": data.openingMove,
+        "openingMoveAnswers": Json(data.openingMoveAnswers) if data.openingMoveAnswers is not None else Json({}),
+        
+        # Dating Preferences
+        "verifiedOnlyPref": data.verifiedOnlyPref,
+        "languagesPref": data.languagesPref if data.languagesPref is not None else [],
+        "smokingPref": data.smokingPref,
+        "drinkingPref": data.drinkingPref,
+        "interestsPref": data.interestsPref if data.interestsPref is not None else [],
+        "minAgePref": data.minAgePref,
+        "maxAgePref": data.maxAgePref,
+        "maxDistance": data.maxDistance,
+        "interestedIn": data.interestedIn if data.interestedIn is not None else [],
+        "lat": data.lat,
+        "lng": data.lng
+    }
+    
+    if data.gender:
+        profile_data["gender"] = data.gender
+    
+    if data.birthDate:
+        try:
+            profile_data["birthDate"] = datetime.fromisoformat(data.birthDate)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid birthDate format. Use ISO format.")
+
+    # Update or create profile
+    profile = await db.profile.upsert(
+        where={"userId": data.userId},
+        data={
+            "create": {**profile_data, "user": {"connect": {"id": data.userId}}},
+            "update": profile_data
+        }
+    )
+
+    # Handle Photos if provided
+    if data.photos is not None:
+        # 1. Remove old photos
+        await db.photo.delete_many(where={"userId": data.userId})
+        
+        # 2. Add new photos
+        for i, photo_item in enumerate(data.photos):
+            await db.photo.create(
+                data={
+                    "userId": data.userId,
+                    "url": photo_item.get("url"),
+                    "isPrimary": photo_item.get("isPrimary", i == 0),
+                    "order": photo_item.get("order", i)
+                }
+            )
+    
+    return {"message": "Profile and photos updated", "profile": profile}
+
+
 
 @router.post("/logout")
 async def user_logout():
@@ -491,3 +744,21 @@ async def user_logout():
 async def edit_profile(user_id: int, data: dict):
     await db.profile.update(where={"userId": user_id}, data=data)
     return {"status": 200, "message": "Updated"}
+
+@router.get("/photos/{user_id}")
+async def get_user_photos(user_id: int):
+    try:
+        photos = await db.photo.find_many(
+            where={"userId": user_id},
+            order={"order": "asc"}
+        )
+
+        return {
+            "message": "Photos fetched successfully",
+            "userId": user_id,
+            "photos": photos
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
