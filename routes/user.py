@@ -510,10 +510,10 @@ async def update_user(user_id: int,photos: List[UploadFile] = File(None)):
         # 2. handle photos separately (RELATION WAY)
         if photos and len(photos) > 0:
 
-            # delete old photos
-            await db.photo.delete_many(
-                where={"userId": user_id}
-            )
+            # # delete old photos
+            # await db.photo.delete_many(
+            #     where={"userId": user_id}
+            # )
 
             # create new photos
             for index, photo in enumerate(photos):
@@ -538,6 +538,33 @@ async def update_user(user_id: int,photos: List[UploadFile] = File(None)):
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/deletephoto/{photo_id}")
+async def delete_photo(photo_id: int):
+    try:
+        photo = await db.photo.find_unique(
+            where={"id": photo_id}
+        )
+
+        if not photo:
+            raise HTTPException(
+                status_code=404,
+                detail="Photo not found"
+            )
+
+        if photo.url and os.path.exists(photo.url):
+            os.remove(photo.url)
+
+        await db.photo.delete(
+            where={"id": photo_id}
+        )
+        return {"message": "Photo deleted successfully"}
+
+    except Exception as e:
+        raise HTTPException(status_code=400,detail=str(e))
+
+
 # @router.post("/update/{user_id}")
 # async def update_user(user_id: int, data: UserUpdateRequest):
 #     update_data = {}
