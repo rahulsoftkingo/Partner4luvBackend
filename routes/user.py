@@ -507,15 +507,7 @@ async def get_user_profile(user_id: int, requester_id: Optional[int] = None):
 async def update_user(user_id: int,photos: List[UploadFile] = File(None)):
     update_data = {}
     try:
-        # 2. handle photos separately (RELATION WAY)
         if photos and len(photos) > 0:
-
-            # # delete old photos
-            # await db.photo.delete_many(
-            #     where={"userId": user_id}
-            # )
-
-            # create new photos
             for index, photo in enumerate(photos):
 
                 file_path = f"uploads/{user_id}_{photo.filename}"
@@ -548,19 +540,13 @@ async def delete_photo(photo_id: int):
         )
 
         if not photo:
-            raise HTTPException(
-                status_code=404,
-                detail="Photo not found"
-            )
+            raise HTTPException(status_code=404,detail="Photo not found")
 
         if photo.url and os.path.exists(photo.url):
             os.remove(photo.url)
 
-        await db.photo.delete(
-            where={"id": photo_id}
-        )
+        await db.photo.delete(where={"id": photo_id})
         return {"message": "Photo deleted successfully"}
-
     except Exception as e:
         raise HTTPException(status_code=400,detail=str(e))
 
