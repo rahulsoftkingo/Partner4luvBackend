@@ -10,6 +10,7 @@ from ai_insights import generate_match_insight, calculate_match_score
 from typing import Union, List
 from utils.token import create_refresh_token
 from fastapi.responses import JSONResponse
+from fastapi import Request
 router = APIRouter(prefix="/user", tags=["mobile"])
 
 class LoginRequest(BaseModel):
