@@ -9,6 +9,7 @@ router = APIRouter(prefix="/social", tags=["social"])
 class InteractionRequest(BaseModel):
     fromUserId: int
     toUserId: int
+    compliment:str
     type: str # LIKE, SUPERLIKE, DISLIKE
 
 @router.on_event("startup")
@@ -72,7 +73,8 @@ async def interact(data: InteractionRequest):
             "create": {
                 "fromUserId": data.fromUserId,
                 "toUserId": data.toUserId,
-                "type": data.type
+                "type": data.type,
+                "compliment":data.compliment
             },
             "update": {
                 "type": data.type
@@ -159,7 +161,8 @@ async def interact(data: InteractionRequest):
     return {
         "message": "Interaction saved",
         "isMatch": False,
-        "reason": "Match conditions not satisfied"
+        "reason": "Match conditions not satisfied",
+        "complimentFromUser1toUser2" : data.compliment
     }
 
 @router.get("/interests/{user_id}")

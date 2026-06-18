@@ -8,7 +8,8 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from ai_insights import generate_match_insight, calculate_match_score
 from typing import Union, List
-
+from utils.token import create_refresh_token
+from fastapi.responses import JSONResponse
 router = APIRouter(prefix="/user", tags=["mobile"])
 
 class LoginRequest(BaseModel):
@@ -160,7 +161,6 @@ async def user_signup(data: SignupRequest):
     if exists:
         raise HTTPException(status_code=400, detail="User already exists")
     
-    hashed_pass = get_password_hash(data.password)
     
     # Get default swipes from Free plan
     free_plan = await db.subscriptionplan.find_unique(where={"name": "Free"})
@@ -318,48 +318,118 @@ async def request_signup_otp(data: OTPRequest):
     
     return {"message": "4-digit code sent", "debug_code": code}
 
+
 @router.post("/signup/complete")
 async def complete_signup(data: CompleteSignupRequest):
     # 1. Verify code
-    verify = await db.verificationcode.find_unique(where={"identifier": data.identifier})
+    verify = await db.verificationcode.find_unique(
+        where={"identifier": data.identifier}
+    )
+
     if not verify or verify.code != data.code:
         raise HTTPException(status_code=400, detail="Invalid verification code")
-    
+
     if verify.expiresAt < datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Code expired")
-    
-    # 2. Create User
+
+    # 2. Create user
     is_email = "@" in data.identifier
     hashed_pass = get_password_hash(data.password)
-    
+
     user_data = {
         "password": hashed_pass,
         "name": data.name,
-        "status": "ACTIVE"
+        "status": "ACTIVE",
+        "tier": "Free"
     }
-    
+
     if is_email:
         user_data["email"] = data.identifier
     else:
         user_data["phone"] = data.identifier
-        
-    try:
-        # Get default swipes from Free plan
-        free_plan = await db.subscriptionplan.find_unique(where={"name": "Free"})
-        default_swipes = free_plan.dailySwipes if free_plan else 10
-        
-        user_data["tier"] = "Free"
-        user_data["swipeLimit"] = default_swipes
 
-        user = await db.user.create(data=user_data)
+    free_plan = await db.subscriptionplan.find_unique(where={"name": "Free"})
+    user_data["swipeLimit"] = free_plan.dailySwipes if free_plan else 10
+
+    user = await db.user.create(data=user_data)
+
+    # 3. Delete verification code
+    await db.verificationcode.delete(where={"id": verify.id})
+
+    # 4. Generate tokens
+    token_payload = {
+        "sub": data.identifier,
+        "user_id": str(user.id),
+        "role": "user"
+    }
+
+    access_token = create_access_token(data=token_payload)
+    refresh_token = create_refresh_token(data=token_payload)
+
+    # 5. Return response + set refresh token in cookie
+    response = JSONResponse(
+        content={
+            "message": "Account created successfully",
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user_id": str(user.id)
+        }
+    )
+
+    # HttpOnly refresh cookie (secure stateless auth)
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=True,        # production me HTTPS required
+        samesite="lax",     # or "none" if cross-domain frontend
+        max_age=7 * 24 * 60 * 60
+    )
+
+    return response
+
+# @router.post("/signup/complete")
+# async def complete_signup(data: CompleteSignupRequest):
+#     # 1. Verify code
+#     verify = await db.verificationcode.find_unique(where={"identifier": data.identifier})
+#     if not verify or verify.code != data.code:
+#         raise HTTPException(status_code=400, detail="Invalid verification code")
+    
+#     if verify.expiresAt < datetime.now(timezone.utc):
+#         raise HTTPException(status_code=400, detail="Code expired")
+    
+#     # 2. Create User
+#     is_email = "@" in data.identifier
+#     hashed_pass = get_password_hash(data.password)
+    
+#     user_data = {
+#         "password": hashed_pass,
+#         "name": data.name,
+#         "status": "ACTIVE"
+#     }
+    
+#     if is_email:
+#         user_data["email"] = data.identifier
+#     else:
+#         user_data["phone"] = data.identifier
         
-        # 3. Cleanup code
-        await db.verificationcode.delete(where={"id": verify.id})
+#     try:
+#         # Get default swipes from Free plan
+#         free_plan = await db.subscriptionplan.find_unique(where={"name": "Free"})
+#         default_swipes = free_plan.dailySwipes if free_plan else 10
         
-        token = create_access_token(data={"sub": data.identifier, "role": "user"})
-        return {"message": "Account created successfully", "access_token": token, "user_id": user.id}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+#         user_data["tier"] = "Free"
+#         user_data["swipeLimit"] = default_swipes
+
+#         user = await db.user.create(data=user_data)
+        
+#         # 3. Cleanup code
+#         await db.verificationcode.delete(where={"id": verify.id})
+        
+#         token = create_access_token(data={"sub": data.identifier, "role": "user"})
+#         return {"message": "Account created successfully", "access_token": token, "user_id": user.id}
+#     except Exception as e:
+#         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/list")
 async def get_users():
@@ -612,20 +682,17 @@ async def setup_profile(data: ProfileSetupRequest):
         "showGender": data.showGender,
         "exercise": data.exercise,
         "drinking": data.drinking,
-        "smoking": data.smoking,
-        
+        "smoking": data.smoking,     
         # New Fields
         "occupation": data.occupation,
         "languages": data.languages if data.languages is not None else [],
         "interests": data.interests if data.interests is not None else [],
         "promptHopingYou": data.promptHopingYou,
         "promptHeartWay": data.promptHeartWay,
-
         # Onboarding/Preferences Missing Fields
         "nickname": data.nickname,
         "openingMove": data.openingMove,
-        "openingMoveAnswers": Json(data.openingMoveAnswers) if data.openingMoveAnswers is not None else Json({}),
-        
+        "openingMoveAnswers": Json(data.openingMoveAnswers) if data.openingMoveAnswers is not None else Json({}),       
         # Dating Preferences
         "verifiedOnlyPref": data.verifiedOnlyPref,
         "languagesPref": data.languagesPref if data.languagesPref is not None else [],
@@ -694,8 +761,54 @@ async def get_user_photos(user_id: int):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@router.post("/refresh")
+async def refresh_token(request: Request):
+    # 1. Get refresh token from cookie
+    refresh_token = request.cookies.get("refresh_token")
+
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="Refresh token missing")
+
+    try:
+        # 2. Verify refresh token
+        payload = verify_refresh_token(refresh_token)
+
+        user_id = payload.get("user_id")
+        email_or_phone = payload.get("sub")
+        role = payload.get("role", "user")
+
+        # 3. Create new access token
+        new_access_token = create_access_token(
+            data={
+                "sub": email_or_phone,
+                "user_id": user_id,
+                "role": role
+            }
+        )
+
+        # 4. Return new access token
+        return {
+            "access_token": new_access_token,
+            "token_type": "bearer"
+        }
+
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+
 @router.post("/logout")
 async def user_logout():
     # In JWT, logout is mostly frontend side, 
     # but we can provide an endpoint for analytics/session tracking.
     return {"message": "Logged out successfully"}
+
+
+
+@router.patch("/profile/edit/{user_id}")
+async def edit_profile(user_id: int, data: dict):
+
+    await db.profile.update(
+        where={"userId": user_id},
+        data=data
+    )
+
+    return {"status":200,"message": "Updated"}

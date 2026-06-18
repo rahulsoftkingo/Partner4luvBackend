@@ -129,6 +129,7 @@ model Interaction {
   id         Int             @id @default(autoincrement())
   fromUserId Int
   toUserId   Int
+  compliment String?
   type       InteractionType
   createdAt  DateTime        @default(now())
   fromUser   User            @relation("InteractionsFrom", fields: [fromUserId], references: [id])
