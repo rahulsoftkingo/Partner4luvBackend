@@ -398,6 +398,36 @@ async def get_users():
     return {"users": users}
 
 
+@router.post("/updatephotos/{user_id}")
+async def update_user(user_id: int,photos: List[UploadFile] = File(None)):
+    update_data = {}
+    try:
+        # 2. handle photos separately (RELATION WAY)
+        if photos and len(photos) > 0:
+            # create new photos
+            for index, photo in enumerate(photos):
+
+                file_path = f"uploads/{user_id}_{photo.filename}"
+
+                with open(file_path, "wb") as buffer:
+                    buffer.write(await photo.read())
+
+                await db.photo.create(
+                    data={
+                        "userId": user_id,
+                        "url": file_path,
+                        "isPrimary": index == 0,
+                        "order": index
+                    }
+                )
+
+        return {
+            "message": "User photos updated successfully",
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @router.delete("/deletephoto/{photo_id}")
 async def delete_photo(photo_id: int):
     try:
