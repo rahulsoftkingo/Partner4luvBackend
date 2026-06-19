@@ -743,7 +743,7 @@ async def user_logout():
 @router.patch("/profile/edit/{user_id}")
 async def edit_profile(user_id: int, data: dict):
     await db.profile.update(where={"userId": user_id}, data=data)
-    return {"status": 200, "message": "Updated"}
+    return {"status": 200, "message": data}
 
 @router.get("/photos/{user_id}")
 async def get_user_photos(user_id: int):
