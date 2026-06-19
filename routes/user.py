@@ -742,9 +742,29 @@ async def user_logout():
 
 @router.patch("/profile/edit/{user_id}")
 async def edit_profile(user_id: int, data: dict):
-    await db.profile.update(where={"userId": user_id}, data=data)
-    return {"status": 200, "message": data}
+    try:
+        if "birthDate" in data and data["birthDate"]:
+            data["birthDate"] = datetime.fromisoformat(
+                data["birthDate"]
+            ).isoformat() + "Z"
 
+        updated_profile = await db.profile.update(
+            where={"userId": user_id},
+            data=data
+        )
+
+        return {
+            "status": 200,
+            "message": "Profile updated successfully",
+            "data": data
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+        
 @router.get("/photos/{user_id}")
 async def get_user_photos(user_id: int):
     try:
