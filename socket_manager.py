@@ -26,27 +26,30 @@ async def join_chat(sid, data):
 
 @sio.event
 async def send_message(sid, data):
-    """
-    Real-time message sending.
-    Data: {matchId, senderId, content, type}
-    """
     match_id = data.get('matchId')
     sender_id = data.get('senderId')
     content = data.get('content')
     msg_type = data.get('type', 'TEXT')
+    duration = data.get('duration')  # only relevant for AUDIO/VIDEO
 
     if not match_id or not sender_id:
         return
 
-    # 1. Save to DB (using direct Prisma calls)
+    if msg_type == 'AUDIO' and not content:
+        return  # audio URL missing, invalid message
+
     try:
-        # Find match to get conversationId
         match = await db.match.find_unique(
             where={"id": int(match_id)},
             include={"conversation": True}
         )
-        
-        if not match: return
+        if not match:
+            return
+
+        # security check: sender match ka participant hai ya nahi
+        if int(sender_id) not in (match.user1Id, match.user2Id):
+            print(f"Unauthorized sender {sender_id} for match {match_id}")
+            return
 
         if not match.conversation:
             convo = await db.conversation.create(data={"matchId": int(match_id)})
@@ -54,23 +57,21 @@ async def send_message(sid, data):
         else:
             convo_id = match.conversation.id
 
-        # Create message
         message = await db.message.create(
             data={
                 "conversationId": convo_id,
                 "senderId": int(sender_id),
                 "content": content,
-                "type": msg_type
+                "type": msg_type,
+                **({"duration": duration} if duration is not None else {})
             }
         )
 
-        # Update conversation timestamp
         await db.conversation.update(
             where={"id": convo_id},
             data={"updatedAt": datetime.now()}
         )
 
-        # 2. Broadcast to room
         await sio.emit('new_message', {
             "matchId": match_id,
             "message": {
@@ -78,6 +79,7 @@ async def send_message(sid, data):
                 "senderId": sender_id,
                 "content": content,
                 "type": msg_type,
+                "duration": duration,
                 "createdAt": message.createdAt.isoformat()
             }
         }, room=f"match_{match_id}")

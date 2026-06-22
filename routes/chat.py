@@ -153,7 +153,7 @@ async def send_message(data: MessageSendRequest):
 
 
 @router.post("/upload/audio")
-async def upload_audio(file: UploadFile, matchId: int, senderId: int):
+async def upload_audio(file: UploadFile):
     try:
         # Validate file type
         allowed_types = {"audio/mpeg", "audio/mp4", "audio/webm", "audio/ogg", "audio/wav"}
@@ -181,7 +181,7 @@ async def upload_audio(file: UploadFile, matchId: int, senderId: int):
             print(f"AUDIO UPLOAD WRITE ERROR: {e}")
             raise HTTPException(500, "Failed to save audio file")
 
-        audio_url = f"/static/audio/{filename}"  # or your CDN/S3 URL
+        audio_url = f"/uploads/audio/{filename}"  # or your CDN/S3 URL
         return {"url": audio_url}
 
     except HTTPException:
