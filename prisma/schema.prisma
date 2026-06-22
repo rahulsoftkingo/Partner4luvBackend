@@ -202,7 +202,6 @@ model Message {
   id             Int          @id @default(autoincrement())
   conversationId Int
   senderId       Int
-  receiverId     Int
   content        String
   type           MessageType  @default(TEXT)
   mediaUrl       String?

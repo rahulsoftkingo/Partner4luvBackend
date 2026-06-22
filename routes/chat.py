@@ -3,6 +3,9 @@ from typing import Optional
 from pydantic import BaseModel
 from db import db
 from datetime import datetime, timezone
+import os
+import uuid
+from fastapi import UploadFile
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -147,3 +150,43 @@ async def send_message(data: MessageSendRequest):
     )
     
     return {"message": "Message sent", "data": message}
+
+
+@router.post("/upload/audio")
+async def upload_audio(file: UploadFile, matchId: int, senderId: int):
+    try:
+        # Validate file type
+        allowed_types = {"audio/mpeg", "audio/mp4", "audio/webm", "audio/ogg", "audio/wav"}
+        if file.content_type not in allowed_types:
+            raise HTTPException(400, "Unsupported audio format")
+
+        # Validate size (e.g. max 10MB for voice notes)
+        contents = await file.read()
+        if len(contents) > 10 * 1024 * 1024:
+            raise HTTPException(400, "File too large")
+
+        if len(contents) == 0:
+            raise HTTPException(400, "Empty file")
+
+        # Save (local disk / S3 / cloud storage — adjust to your setup)
+        ext = file.filename.split(".")[-1] if "." in file.filename else "bin"
+        filename = f"{uuid.uuid4()}.{ext}"
+        file_path = f"uploads/audio/{filename}"
+
+        try:
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            with open(file_path, "wb") as f:
+                f.write(contents)
+        except OSError as e:
+            print(f"AUDIO UPLOAD WRITE ERROR: {e}")
+            raise HTTPException(500, "Failed to save audio file")
+
+        audio_url = f"/static/audio/{filename}"  # or your CDN/S3 URL
+        return {"url": audio_url}
+
+    except HTTPException:
+        # re-raise as-is, already has proper status code + message
+        raise
+    except Exception as e:
+        print(f"AUDIO UPLOAD ERROR: {e}")
+        raise HTTPException(500, "Something went wrong while uploading audio")
