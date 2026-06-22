@@ -639,6 +639,27 @@ async def get_onboarding_questions():
     )
     return {"categories": categories}
 
+
+@router.get("/qa/{user_id}")
+async def get_user_questionsresponses(user_id: int):
+    get_user_response = await db.userresponse.find_many(
+        where={
+            "userId": user_id
+        },
+        include={
+            "question": {
+                "include": {
+                    "options": True
+                }
+            },
+            "option": True
+        },
+        order={
+            "id": "asc"
+        }
+    )
+    return {"userquestions": get_user_response}
+
 @router.post("/onboarding/responses")
 async def save_responses(data: UserResponsesRequest):
     question_ids = [r.questionId for r in data.responses]

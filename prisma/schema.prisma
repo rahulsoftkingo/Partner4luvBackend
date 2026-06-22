@@ -202,6 +202,7 @@ model Message {
   id             Int          @id @default(autoincrement())
   conversationId Int
   senderId       Int
+  receiverId     Int
   content        String
   type           MessageType  @default(TEXT)
   mediaUrl       String?
@@ -231,6 +232,7 @@ model Question {
   order      Int                   @default(0)
   createdAt  DateTime              @default(now())
   imageUrl   String?
+  selectionLimit  Int?             @default(1)
   category   QuestionnaireCategory @relation(fields: [categoryId], references: [id])
   options    QuestionOption[]
   responses  UserResponse[]
@@ -501,6 +503,7 @@ enum QuestionType {
   VISUAL_PIE
   VISUAL_PATTERN
   VISUAL_IMAGE
+  text
 }
 
 enum VerificationStatus {

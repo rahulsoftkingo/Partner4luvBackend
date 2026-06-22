@@ -31,26 +31,83 @@ User 2:
 Bio: {u2_bio}
 Tags: {u2_tags_text}
 
-Analyze compatibility between these two users.
+Analyze the compatibility between these two users for a dating application.
 
-Evaluate:
+Evaluate the following categories:
+- Strength
+- Personality
+- Relationship
 - Lifestyle
-- Career
-- Core Values
-- Adventure
+- Values Alignment
+- Interest Match
+- Habit
+- Final
 
-Return ONLY JSON in this format:
+Give each category a score from 0 to 100.
+
+For every category, provide:
+- score
+- user1 insight
+- user2 insight
+
+Return ONLY valid JSON in the following format:
 
 {{
-    "overallScore": 85,
-    "summary": "short explanation here",
-    "breakdown": [
-        {{"category": "Lifestyle", "score": 90}},
-        {{"category": "Career", "score": 75}},
-        {{"category": "Core Values", "score": 95}},
-        {{"category": "Adventure", "score": 60}}
-    ]
+  "overallScore": 85,
+  "summary": "A short compatibility summary.",
+  "breakdown": [
+    {{
+      "category": "Strength",
+      "score": 80,
+      "user1": "User 1's strengths show in one word",
+      "user2": "User 2's strengths show in one word"
+    }},
+    {{
+      "category": "Personality",
+      "score": 88,
+      "user1": "User 1 personality insight show in one word",
+      "user2": "User 2 personality insight show in one word"
+    }},
+    {{
+      "category": "Relationship",
+      "score": 84,
+      "user1": "User 1 relationship style show in one word",
+      "user2": "User 2 relationship style show in one word"
+    }},
+    {{
+      "category": "Lifestyle",
+      "score": 90,
+      "user1": "User 1 lifestyle show in one word",
+      "user2": "User 2 lifestyle show in one word"
+    }},
+    {{
+      "category": "Values Alignment",
+      "score": 92,
+      "user1": "User 1 values show in one word",
+      "user2": "User 2 values show in one word"
+    }},
+    {{
+      "category": "Interest Match",
+      "score": 78,
+      "user1": "User 1 interests show in one word",
+      "user2": "User 2 interests show in one word"
+    }},
+    {{
+      "category": "Habit",
+      "score": 81,
+      "user1": "User 1 habits show in one word",
+      "user2": "User 2 habits show in one word"
+    }},
+    {{
+      "category": "Final",
+      "score": 85,
+      "user1": "Overall summary for User 1 show in one word",
+      "user2": "Overall summary for User 2 show in one word"
+    }}
+  ]
 }}
+
+Do not include markdown, explanations, or any text outside the JSON.
 """
 
         response = client.chat.completions.create(
@@ -59,7 +116,7 @@ Return ONLY JSON in this format:
                 {"role": "user", "content": prompt}
             ],
             response_format={"type": "json_object"},
-            max_tokens=300
+            max_tokens=1000
         )
 
         content = response.choices[0].message.content
@@ -84,9 +141,9 @@ Return ONLY JSON in this format:
             ]
         }
 
+
 """ Simple fallback similarity score (Jaccard similarity)"""
 def calculate_match_score(user1_tags: list, user2_tags: list):
-
 
     if not user1_tags or not user2_tags:
         return 50

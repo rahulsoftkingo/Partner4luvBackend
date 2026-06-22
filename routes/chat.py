@@ -76,6 +76,7 @@ async def get_conversations(user_id: int):
 
 @router.get("/messages/{match_id}")
 async def get_messages(match_id: int, my_id: int, skip: int = 0, take: int = 50):
+    
     # 1. Ensure conversation exists
     match = await db.match.find_unique(
         where={"id": match_id},
@@ -86,7 +87,7 @@ async def get_messages(match_id: int, my_id: int, skip: int = 0, take: int = 50)
         raise HTTPException(status_code=404, detail="Match not found")
     
     if not match.conversation:
-        return {"messages": []}
+        return {status:200,"messages": []}
 
     # 2. Mark messages as read (those sent by the other person)
     await db.message.update_many(

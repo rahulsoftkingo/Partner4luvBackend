@@ -221,149 +221,198 @@ async def get_user_matches(user_id: int):
         
     return {"matches": result}
 
+
 @router.get("/recommendations/{user_id}")
 async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):
-    from datetime import datetime
-    import math
-
-    # 1. Get current user's profile and preferences
+    # 1. Get current user's profile
     user = await db.user.find_unique(
         where={"id": user_id},
-        include={"profile": True, "responses": {"include": {"option": True}}}
+        include={"profile": True}
     )
     if not user or not user.profile:
         raise HTTPException(status_code=404, detail="User profile not completed")
 
     p = user.profile
-    user_tags = set()
-    for resp in user.responses:
-        # Safely get tags if they exist on the option object
-        tags = getattr(resp.option, "tags", None)
-        if tags:
-            user_tags.update(tags)
-    # 2. Exclude already interacted users
+
+    # 2. Exclude already interacted users (liked/disliked) + self
     interacted = await db.interaction.find_many(where={"fromUserId": user_id})
     interacted_ids = [i.toUserId for i in interacted]
     interacted_ids.append(user_id)
 
-    # 3. Build Filters
-    # Filter by Gender (Interested In)
+    # 3. Gender Filter
     gender_filter = {}
     if p.interestedIn and len(p.interestedIn) > 0:
         gender_filter = {"gender": {"in": p.interestedIn}}
 
-    # Filter by Age Range
-    min_year = (datetime.now().year - p.maxAgePref) if p.maxAgePref else 1900
-    max_year = (datetime.now().year - p.minAgePref) if p.minAgePref else datetime.now().year
-    
-    # Simple birthDate filter (assumes ISO string or DateTime)
-    # Since Prisma handles DateTime, we calculate bounds
-    age_filter = {}
-    if p.minAgePref or p.maxAgePref:
-        # Note: This is approximate by year
-        age_filter = {
-            "birthDate": {
-                "gte": datetime(min_year, 1, 1),
-                "lte": datetime(max_year, 12, 31)
-            }
-        }
-
-    # 4. Fetch Candidates
+    # 4. Fetch Candidates (only gender + interacted filter applied)
     candidates = await db.user.find_many(
         where={
             "id": {"not_in": interacted_ids},
             "status": "ACTIVE",
             "profile": {
                 "is": {
-                    **gender_filter,
-                    **age_filter
+                    **gender_filter
                 }
             }
         },
         include={
-            "profile": True, 
-            # "photos": {"where": {"aiStatus": "VERIFIED"}, "take": 5},
+            "profile": True,
             "photos": {"take": 5},
-            "responses": {"include": {"option": True}}
         },
-        take=100
+        skip=skip,
+        take=take
     )
-    
-     
-    # recommendations = []
 
-    # for user in candidates:
-    #     recommendations.append({
-    #         "id": user.id,
-    #         "name": user.name,
-    #         "email": user.email,
-    #         "matchRate": user.matchRate,
-    #         "profile": {
-    #             "city": user.profile.city,
-    #             "country": user.profile.country,
-    #             "bio": user.profile.bio,
-    #             "gender": user.profile.gender,
-    #         }
-    #     })
-    # 5. Distance Calculation & Scoring
-    scored_candidates = []
-    
-    def calculate_distance(lat1, lon1, lat2, lon2):
-        if not all([lat1, lon1, lat2, lon2]): return 9999
-        # Haversine formula
-        R = 6371 # Earth radius in km
-        dLat = math.radians(lat2 - lat1)
-        dLon = math.radians(lon2 - lon1)
-        a = math.sin(dLat/2) * math.sin(dLat/2) + \
-            math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * \
-            math.sin(dLon/2) * math.sin(dLon/2)
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-        return R * c
+    final_list = [{"user": cand} for cand in candidates]
 
-    for cand in candidates:
-        if not cand.profile: continue
-        
-        print(f"Show latitude and longitude for p and cand {cand.profile.lat} - {cand.profile.lng}-{p.lat} - {p.lng}", end="\n")
-        # Distance Filter
-        dist = calculate_distance(p.lat, p.lng, cand.profile.lat, cand.profile.lng)
-        if p.maxDistance and dist > p.maxDistance:
-            continue
-
-        # Tag Scoring
-        cand_tags = set()
-        for resp in cand.responses:
-            if resp.option.tags: cand_tags.update(resp.option.tags)
-        
-        tag_score = 0
-        if user_tags and cand_tags:
-            intersection = len(user_tags.intersection(cand_tags))
-            union = len(user_tags.union(cand_tags))
-            tag_score = (intersection / union) * 100 if union > 0 else 0
-        
-        # Final Score: Weighting (Tags 70%, Distance 30%)
-        # Closer is better
-        dist_score = max(0, 100 - (dist / (p.maxDistance or 50) * 100)) if dist != 9999 else 0
-        final_score = (tag_score * 0.7) + (dist_score * 0.3)
-
-        scored_candidates.append({
-            "user": cand,
-            "matchScore": round(final_score, 1),
-            "distance": round(dist, 1) if dist != 9999 else None,
-            "isBlurred": user.tier == "Free"
-        })
-
-    # 6. Sort and Obfuscate
-    scored_candidates.sort(key=lambda x: x["matchScore"], reverse=True)
-    
-    final_list = scored_candidates[skip:skip+take]
-    if user.tier == "Free":
-        for item in final_list:
-            item["user"].profile.bio = "Upgrade to Premium to see bio"
-            item["user"].profile.promptHopingYou = "*** Hidden ***"
-            item["user"].profile.promptHeartWay = "*** Hidden ***"
-    
     return {
         "recommendations": final_list,
-        "total": len(scored_candidates),
-        "userTier": user.tier
+        "total": len(final_list)
     }
+
+# @router.get("/recommendations/{user_id}")
+# async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):
+#     from datetime import datetime
+#     import math
+
+#     # 1. Get current user's profile and preferences
+#     user = await db.user.find_unique(
+#         where={"id": user_id},
+#         include={"profile": True, "responses": {"include": {"option": True}}}
+#     )
+#     if not user or not user.profile:
+#         raise HTTPException(status_code=404, detail="User profile not completed")
+
+#     p = user.profile
+#     user_tags = set()
+#     for resp in user.responses:
+#         # Safely get tags if they exist on the option object
+#         tags = getattr(resp.option, "tags", None)
+#         if tags:
+#             user_tags.update(tags)
+#     # 2. Exclude already interacted users
+#     interacted = await db.interaction.find_many(where={"fromUserId": user_id})
+#     interacted_ids = [i.toUserId for i in interacted]
+#     interacted_ids.append(user_id)
+
+#     # 3. Build Filters
+#     # Filter by Gender (Interested In)
+#     gender_filter = {}
+#     if p.interestedIn and len(p.interestedIn) > 0:
+#         gender_filter = {"gender": {"in": p.interestedIn}}
+
+#     # Filter by Age Range
+#     min_year = (datetime.now().year - p.maxAgePref) if p.maxAgePref else 1900
+#     max_year = (datetime.now().year - p.minAgePref) if p.minAgePref else datetime.now().year
+    
+#     # Simple birthDate filter (assumes ISO string or DateTime)
+#     # Since Prisma handles DateTime, we calculate bounds
+#     age_filter = {}
+#     if p.minAgePref or p.maxAgePref:
+#         # Note: This is approximate by year
+#         age_filter = {
+#             "birthDate": {
+#                 "gte": datetime(min_year, 1, 1),
+#                 "lte": datetime(max_year, 12, 31)
+#             }
+#         }
+
+#     # 4. Fetch Candidates
+#     candidates = await db.user.find_many(
+#         where={
+#             "id": {"not_in": interacted_ids},
+#             "status": "ACTIVE",
+#             "profile": {
+#                 "is": {
+#                     **gender_filter,
+#                     **age_filter
+#                 }
+#             }
+#         },
+#         include={
+#             "profile": True, 
+#             # "photos": {"where": {"aiStatus": "VERIFIED"}, "take": 5},
+#             "photos": {"take": 5},
+#             "responses": {"include": {"option": True}}
+#         },
+#         take=100
+#     )
+    
+     
+#     # recommendations = []
+
+#     # for user in candidates:
+#     #     recommendations.append({
+#     #         "id": user.id,
+#     #         "name": user.name,
+#     #         "email": user.email,
+#     #         "matchRate": user.matchRate,
+#     #         "profile": {
+#     #             "city": user.profile.city,
+#     #             "country": user.profile.country,
+#     #             "bio": user.profile.bio,
+#     #             "gender": user.profile.gender,
+#     #         }
+#     #     })
+#     # 5. Distance Calculation & Scoring
+#     scored_candidates = []
+    
+#     def calculate_distance(lat1, lon1, lat2, lon2):
+#         if not all([lat1, lon1, lat2, lon2]): return 9999
+#         # Haversine formula
+#         R = 6371 # Earth radius in km
+#         dLat = math.radians(lat2 - lat1)
+#         dLon = math.radians(lon2 - lon1)
+#         a = math.sin(dLat/2) * math.sin(dLat/2) + \
+#             math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * \
+#             math.sin(dLon/2) * math.sin(dLon/2)
+#         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+#         return R * c
+
+#     for cand in candidates:
+#         if not cand.profile: continue
+        
+#         print(f"Show latitude and longitude for p and cand {cand.profile.lat} - {cand.profile.lng}-{p.lat} - {p.lng}", end="\n")
+#         # Distance Filter
+#         dist = calculate_distance(p.lat, p.lng, cand.profile.lat, cand.profile.lng)
+#         if p.maxDistance and dist > p.maxDistance:
+#             continue
+
+#         # Tag Scoring
+#         cand_tags = set()
+#         for resp in cand.responses:
+#             if resp.option.tags: cand_tags.update(resp.option.tags)
+        
+#         tag_score = 0
+#         if user_tags and cand_tags:
+#             intersection = len(user_tags.intersection(cand_tags))
+#             union = len(user_tags.union(cand_tags))
+#             tag_score = (intersection / union) * 100 if union > 0 else 0
+        
+#         # Final Score: Weighting (Tags 70%, Distance 30%)
+#         # Closer is better
+#         dist_score = max(0, 100 - (dist / (p.maxDistance or 50) * 100)) if dist != 9999 else 0
+#         final_score = (tag_score * 0.7) + (dist_score * 0.3)
+
+#         scored_candidates.append({
+#             "user": cand,
+#             "matchScore": round(final_score, 1),
+#             "distance": round(dist, 1) if dist != 9999 else None,
+#             "isBlurred": user.tier == "Free"
+#         })
+
+#     # 6. Sort and Obfuscate
+#     scored_candidates.sort(key=lambda x: x["matchScore"], reverse=True)
+    
+#     final_list = scored_candidates[skip:skip+take]
+#     if user.tier == "Free":
+#         for item in final_list:
+#             item["user"].profile.bio = "Upgrade to Premium to see bio"
+#             item["user"].profile.promptHopingYou = "*** Hidden ***"
+#             item["user"].profile.promptHeartWay = "*** Hidden ***"
+    
+#     return {
+#         "recommendations": final_list,
+#         "total": len(scored_candidates),
+#         "userTier": user.tier
+#     }
