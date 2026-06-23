@@ -152,6 +152,27 @@ async def send_message(data: MessageSendRequest):
     return {"message": "Message sent", "data": message}
 
 
+@router.delete("/conversations/clear/{user_id}")
+async def clear_chat(user_id: int):
+    try:
+        # Mark messages as deleted for this user
+        updated_messages = await db.message.update_many(
+            where={"senderId": user_id},
+            data={"isDelete": True}
+        )
+
+        return {
+            "status":200,
+            "message": "Chat cleared successfully",
+        }
+
+    except HTTPException:
+        raise
+    
+    except Exception as e:
+        raise HTTPException(status_code=500,detail=f"Failed to clear chat: {str(e)}")
+
+
 @router.post("/upload/audio")
 async def upload_audio(file: UploadFile):
     try:

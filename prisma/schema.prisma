@@ -204,6 +204,7 @@ model Message {
   senderId       Int
   content        String
   type           MessageType  @default(TEXT)
+  isDelete       Boolean      @default(false)
   mediaUrl       String?
   createdAt      DateTime     @default(now())
   isRead         Boolean      @default(false)
