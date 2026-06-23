@@ -48,6 +48,7 @@ model User {
   giftsSent            SentGift[]           @relation("GiftsSent")
   matchSettings        UserMatchSetting?
   responses            UserResponse[]
+  quotes               Quote[]       
 
   @@unique([socialProvider, socialId])
 }
@@ -210,6 +211,15 @@ model Message {
   isRead         Boolean      @default(false)
   conversation   Conversation @relation(fields: [conversationId], references: [id])
   sender         User         @relation(fields: [senderId], references: [id])
+}
+
+model Quote {
+  id        Int   @id @default(autoincrement())
+  userId    Int
+  text      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id])
 }
 
 model QuestionnaireCategory {

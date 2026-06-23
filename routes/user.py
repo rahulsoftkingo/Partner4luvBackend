@@ -124,6 +124,11 @@ class ResetPasswordRequest(BaseModel):
     email: str
     token: str
     newPassword: str
+    
+    
+class QuoteCreate(BaseModel):
+    userId: int
+    text: str
 
 
 # --- Routes ---
@@ -785,7 +790,40 @@ async def edit_profile(user_id: int, data: dict):
             status_code=500,
             detail=str(e)
         )
-        
+
+
+# Create Quote
+@router.post("/quotes")
+async def create_quote(payload: QuoteCreate):
+    quote = await db.quote.create(
+        data={
+            "userId": payload.userId,
+            "text": payload.text
+        }
+    )
+
+    return {
+        "status": 200,
+        "message": "Quote created successfully",
+        "data": quote
+    }
+    
+     
+@router.get("/quotes/{id}")
+async def get_user_quotes(id: int):
+
+    quotes = await db.quote.find_many(
+        where={
+            "userId": id
+        }
+    )
+
+    return {
+        "status": 200,
+        "message": "Quotes fetched successfully",
+        "data": quotes
+    }
+     
 @router.get("/photos/{user_id}")
 async def get_user_photos(user_id: int):
     try:
