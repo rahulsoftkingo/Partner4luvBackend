@@ -48,7 +48,8 @@ model User {
   giftsSent            SentGift[]           @relation("GiftsSent")
   matchSettings        UserMatchSetting?
   responses            UserResponse[]
-  quotes               Quote[]       
+  quotes               Quote[]
+  fcmToken             String?             
 
   @@unique([socialProvider, socialId])
 }

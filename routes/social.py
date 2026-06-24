@@ -263,6 +263,48 @@ async def delete_messages_by_match(matchId: str):
     }
 
 
+# @router.push("/push/notifications")
+# async def delete_messages_by_match(matchId: str):
+#     # 1. Find the match and its associated conversation
+#     match = await db.match.find_unique(
+#         where={"id": matchId},
+#         include={"conversation": True}
+#     )
+    
+#     if not match:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND, 
+#             detail="Match not found"
+#         )
+    
+#     if not match.conversation:
+#         raise HTTPException(
+#             status_code=status.HTTP_444_NOT_FOUND, # Or 200 with a "No history to clear" message
+#             detail="No conversation history found for this match"
+#         )
+    
+#     convo_id = match.conversation.id
+
+#     # 2. Delete all messages inside this conversation
+#     # delete_many returns the count of deleted rows
+#     deleted_meta = await db.message.delete_many(
+#         where={
+#             "conversationId": convo_id
+#         }
+#     )
+    
+#     # 3. Reset or update the conversation's updatedAt timestamp
+#     await db.conversation.update(
+#         where={"id": convo_id},
+#         data={"updatedAt": datetime.now(timezone.utc)}
+#     )
+    
+#     return {
+#         "message": "Chat history cleared successfully",
+#         "deleted_count": deleted_meta
+#     }
+
+
 @router.get("/recommendations/{user_id}")
 async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):
     # 1. Get current user's profile

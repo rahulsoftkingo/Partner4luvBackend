@@ -1,5 +1,8 @@
 import os
 from dotenv import load_dotenv
+import firebase_admin
+from firebase_admin import credentials
+from routes.callinvite import router as call_router
 
 # Load environment variables from .env in the same directory as main.py
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -15,7 +18,14 @@ from routes import admin, user, economy, social, chat, ai, notifications
 
 from db import db
 
+
+cred = credentials.Certificate("serviceaccountkey.json")
+firebase_admin.initialize_app(cred)
+
 app = FastAPI(title="Partner4Luv API")
+
+
+app.include_router(call_router)
 
 # Setup CORS
 app.add_middleware(

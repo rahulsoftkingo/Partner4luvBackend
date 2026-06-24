@@ -6,7 +6,11 @@ from datetime import datetime, timezone
 import os
 import uuid
 from fastapi import UploadFile
+import whisper
+import os
 
+
+model = whisper.load_model("base")
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 class MessageSendRequest(BaseModel):
@@ -173,41 +177,23 @@ async def clear_chat(user_id: int):
         raise HTTPException(status_code=500,detail=f"Failed to clear chat: {str(e)}")
 
 
+
 @router.post("/upload/audio")
 async def upload_audio(file: UploadFile):
-    try:
-        # Validate file type
-        allowed_types = {"audio/mpeg", "audio/mp4", "audio/webm", "audio/ogg", "audio/wav"}
-        if file.content_type not in allowed_types:
-            raise HTTPException(400, "Unsupported audio format")
+    contents = await file.read()
 
-        # Validate size (e.g. max 10MB for voice notes)
-        contents = await file.read()
-        if len(contents) > 10 * 1024 * 1024:
-            raise HTTPException(400, "File too large")
+    filename = f"{uuid.uuid4()}.mp3"
+    file_path = f"uploads/audio/{filename}"
 
-        if len(contents) == 0:
-            raise HTTPException(400, "Empty file")
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
-        # Save (local disk / S3 / cloud storage — adjust to your setup)
-        ext = file.filename.split(".")[-1] if "." in file.filename else "bin"
-        filename = f"{uuid.uuid4()}.{ext}"
-        file_path = f"uploads/audio/{filename}"
+    with open(file_path, "wb") as f:
+        f.write(contents)
 
-        try:
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            with open(file_path, "wb") as f:
-                f.write(contents)
-        except OSError as e:
-            print(f"AUDIO UPLOAD WRITE ERROR: {e}")
-            raise HTTPException(500, "Failed to save audio file")
+    # Audio to Text
+    result = model.transcribe(file_path)
 
-        audio_url = f"/uploads/audio/{filename}"  # or your CDN/S3 URL
-        return {"url": audio_url}
-
-    except HTTPException:
-        # re-raise as-is, already has proper status code + message
-        raise
-    except Exception as e:
-        print(f"AUDIO UPLOAD ERROR: {e}")
-        raise HTTPException(500, "Something went wrong while uploading audio")
+    return {
+        "audio_url": f"/uploads/audio/{filename}",
+        "text": result["text"]
+    }
