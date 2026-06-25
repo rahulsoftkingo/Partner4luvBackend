@@ -132,10 +132,12 @@ model Interaction {
   fromUserId Int
   toUserId   Int
   compliment String?
+  quoteid    Int?
   type       InteractionType
   createdAt  DateTime        @default(now())
   fromUser   User            @relation("InteractionsFrom", fields: [fromUserId], references: [id])
   toUser     User            @relation("InteractionsTo", fields: [toUserId], references: [id])
+  quote      Quote?           @relation(fields: [quoteid], references: [id])
 
   @@unique([fromUserId, toUserId])
 }
@@ -221,6 +223,7 @@ model Quote {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   user      User     @relation(fields: [userId], references: [id])
+  interaction Interaction[]
 }
 
 model QuestionnaireCategory {

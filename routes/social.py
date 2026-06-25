@@ -11,6 +11,7 @@ class InteractionRequest(BaseModel):
     toUserId: int
     compliment:str
     type: str # LIKE, SUPERLIKE, DISLIKE
+    quoteid: int
 
 @router.on_event("startup")
 async def startup():
@@ -74,7 +75,8 @@ async def interact(data: InteractionRequest):
                 "fromUserId": data.fromUserId,
                 "toUserId": data.toUserId,
                 "type": data.type,
-                "compliment":data.compliment
+                "compliment":data.compliment,
+                "quoteid":data.quoteid
             },
             "update": {
                 "type": data.type
