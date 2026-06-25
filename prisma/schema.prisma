@@ -1,6 +1,6 @@
 generator client {
   provider             = "prisma-client-py"
-  output               = "../venv/Lib/site-packages/prisma"
+  output               = "../venv/lib/site-packages/prisma"
   recursive_type_depth = "5"
 }
 
