@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
-import firebase_admin
-from firebase_admin import credentials
+# import firebase_admin
+# from firebase_admin import credentials
 from routes.callinvite import router as call_router
 
 # Load environment variables from .env in the same directory as main.py
