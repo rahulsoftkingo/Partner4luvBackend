@@ -19,8 +19,8 @@ from routes import admin, user, economy, social, chat, ai, notifications
 from db import db
 
 
-cred = credentials.Certificate("serviceaccountkey.json")
-firebase_admin.initialize_app(cred)
+# cred = credentials.Certificate("serviceaccountkey.json")
+# firebase_admin.initialize_app(cred)
 
 app = FastAPI(title="Partner4Luv API")
 
