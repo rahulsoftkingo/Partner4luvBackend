@@ -27,7 +27,8 @@ async def startup():
 
 @router.get("/conversations/{user_id}")
 async def get_conversations(user_id: int):
-    # Find all matches for the user
+    # 1. Saare matches ek hi query mein lekar aao
+    # FIX: 'order_by' ko sahi karke 'order' kiya taaki database se sirf 1 hi message aaye
     matches = await db.match.find_many(
         where={
             "OR": [
@@ -42,7 +43,7 @@ async def get_conversations(user_id: int):
             "conversation": {
                 "include": {
                     "messages": {
-                        "order_by": {"createdAt": "desc"},
+                        "order": {"createdAt": "desc"},  # 👈 FIX: 'order_by' ki jagah 'order'
                         "take": 1
                     }
                 }
@@ -50,36 +51,69 @@ async def get_conversations(user_id: int):
         }
     )
 
-    result = []
+    # 2. Pehle list taiyaar karo aur background tasks banao
+    tasks = []
+    temp_results = []
+
     for m in matches:
         other_user = m.user2 if m.user1Id == user_id else m.user1
         last_message = None
-        unread_count = 0
         
+        if m.conversation and m.conversation.messages:
+            last_message = m.conversation.messages[0]
+        
+        # Savelist mein temporary data daal rahe hain
+        temp_results.append({
+            "matchId": m.id,
+            "otherUser": other_user,
+            "lastMessage": last_message,
+            "updatedAt": m.conversation.updatedAt if m.conversation else m.createdAt,
+            "conversation_id": m.conversation.id if m.conversation else None,
+            "other_user_id": other_user.id
+        })
+
+        # Har match ke liye count query ka task banao (Abhi await nahi karenge)
         if m.conversation:
-            # Get last message
-            if m.conversation.messages:
-                last_message = m.conversation.messages[0]
-            
-            # Count unread messages (sent by OTHER user)
-            unread_count = await db.message.count(
+            task = db.message.count(
                 where={
                     "conversationId": m.conversation.id,
                     "senderId": other_user.id,
                     "isRead": False
                 }
             )
+            tasks.append(task)
+        else:
+            tasks.append(None) # Agar conversation nahi hai toh None daal do
+
+    # 3. OPTIMIZATION: Saare unread counts ek saath parallel fetch honge (No N+1 loop lag)
+    # Isse 20 queries alag-alag chalne ke bajaye parallel mein milliseconds mein khatam ho jayengi
+    unread_counts = []
+    if tasks:
+        # tasks mein se None hata kar sirf valid DB hits parallel chalayenge
+        valid_tasks = [t for t in tasks if t is not None]
+        valid_counts = await asyncio.gather(*valid_tasks)
         
+        # Valid counts ko wapas unread_counts ki sahi position par map karenge
+        count_iter = iter(valid_counts)
+        unread_counts = [next(count_iter) if t is not None else 0 for t in tasks]
+    else:
+        unread_counts = [0] * len(temp_results)
+
+    # 4. Final output array structure taiyaar karo
+    result = []
+    for index, temp in enumerate(temp_results):
         result.append({
-            "matchId": m.id,
-            "otherUser": other_user,
-            "lastMessage": last_message,
-            "unreadCount": unread_count,
-            "updatedAt": m.conversation.updatedAt if m.conversation else m.createdAt
+            "matchId": temp["matchId"],
+            "otherUser": temp["otherUser"],
+            "lastMessage": temp["lastMessage"],
+            "unreadCount": unread_counts[index], # Sahi count position se uthaya
+            "updatedAt": temp["updatedAt"]
         })
     
-    # Sort by recent message/activity
+    # Recent activity ke hisab se sort karo
     result.sort(key=lambda x: x["updatedAt"], reverse=True)
+    
+    # 5. Exact same JSON format return karo
     return {"conversations": result}
 
 @router.get("/messages/{match_id}")
