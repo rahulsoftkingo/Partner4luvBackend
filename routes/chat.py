@@ -27,8 +27,7 @@ async def startup():
 
 @router.get("/conversations/{user_id}")
 async def get_conversations(user_id: int):
-    # 1. Saare matches ek hi query mein lekar aao
-    # FIX: 'order_by' ko sahi karke 'order' kiya taaki database se sirf 1 hi message aaye
+    # 1. Matches fetch karo sahi 'order_by' syntax ke saath
     matches = await db.match.find_many(
         where={
             "OR": [
@@ -43,7 +42,10 @@ async def get_conversations(user_id: int):
             "conversation": {
                 "include": {
                     "messages": {
-                        "order": {"createdAt": "desc"},  # 👈 FIX: 'order_by' ki jagah 'order'
+                        # FIX: Prisma Python Client mein nested relation ke liye 'order_by' aise likhte hain
+                        "order_by": {
+                            "createdAt": "desc"
+                        },
                         "take": 1
                     }
                 }
@@ -51,7 +53,7 @@ async def get_conversations(user_id: int):
         }
     )
 
-    # 2. Pehle list taiyaar karo aur background tasks banao
+    # 2. Results array aur background parallel tasks setup
     tasks = []
     temp_results = []
 
@@ -62,17 +64,15 @@ async def get_conversations(user_id: int):
         if m.conversation and m.conversation.messages:
             last_message = m.conversation.messages[0]
         
-        # Savelist mein temporary data daal rahe hain
         temp_results.append({
             "matchId": m.id,
             "otherUser": other_user,
             "lastMessage": last_message,
             "updatedAt": m.conversation.updatedAt if m.conversation else m.createdAt,
-            "conversation_id": m.conversation.id if m.conversation else None,
-            "other_user_id": other_user.id
+            "conversation_id": m.conversation.id if m.conversation else None
         })
 
-        # Har match ke liye count query ka task banao (Abhi await nahi karenge)
+        # Count queries ko parallel chalane ke liye list mein daalo
         if m.conversation:
             task = db.message.count(
                 where={
@@ -83,38 +83,38 @@ async def get_conversations(user_id: int):
             )
             tasks.append(task)
         else:
-            tasks.append(None) # Agar conversation nahi hai toh None daal do
+            tasks.append(None)
 
-    # 3. OPTIMIZATION: Saare unread counts ek saath parallel fetch honge (No N+1 loop lag)
-    # Isse 20 queries alag-alag chalne ke bajaye parallel mein milliseconds mein khatam ho jayengi
+    # 3. Parallel execution (Fast fetch logic)
     unread_counts = []
     if tasks:
-        # tasks mein se None hata kar sirf valid DB hits parallel chalayenge
         valid_tasks = [t for t in tasks if t is not None]
-        valid_counts = await asyncio.gather(*valid_tasks)
-        
-        # Valid counts ko wapas unread_counts ki sahi position par map karenge
-        count_iter = iter(valid_counts)
-        unread_counts = [next(count_iter) if t is not None else 0 for t in tasks]
+        if valid_tasks:
+            valid_counts = await asyncio.gather(*valid_tasks)
+            count_iter = iter(valid_counts)
+            unread_counts = [next(count_iter) if t is not None else 0 for t in tasks]
+        else:
+            unread_counts = [0] * len(temp_results)
     else:
         unread_counts = [0] * len(temp_results)
 
-    # 4. Final output array structure taiyaar karo
+    # 4. Final output array construct karo
     result = []
     for index, temp in enumerate(temp_results):
         result.append({
             "matchId": temp["matchId"],
             "otherUser": temp["otherUser"],
             "lastMessage": temp["lastMessage"],
-            "unreadCount": unread_counts[index], # Sahi count position se uthaya
+            "unreadCount": unread_counts[index],
             "updatedAt": temp["updatedAt"]
         })
     
-    # Recent activity ke hisab se sort karo
+    # Sorting according to recent messages
     result.sort(key=lambda x: x["updatedAt"], reverse=True)
     
-    # 5. Exact same JSON format return karo
+    # 5. Exact same JSON format return hoga
     return {"conversations": result}
+
 
 @router.get("/messages/{match_id}")
 async def get_messages(match_id: int, my_id: int, skip: int = 0, take: int = 50):
@@ -142,9 +142,7 @@ async def get_messages(match_id: int, my_id: int, skip: int = 0, take: int = 50)
         include={"sender": True}
     )
 
-    # 3. FIX: Run the heavy 'update_many' in the background.
-    # We use asyncio.create_task so the API returns the messages IMMEDIATELY 
-    # to the user while the database updates the 'isRead' status in the background.
+
     async def mark_as_read_background():
         try:
             await db.message.update_many(
