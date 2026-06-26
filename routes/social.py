@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException
+import asyncio
+from fastapi import APIRouter, HTTPException, status
 from typing import Optional
 from pydantic import BaseModel
 from db import db
@@ -306,40 +307,62 @@ async def delete_messages_by_match(matchId: str):
 #         "deleted_count": deleted_meta
 #     }
 
-
 @router.get("/recommendations/{user_id}")
 async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):
-    # 1. Get current user's profile
+    
+    # 1. FIX: 'select' hata kar 'include' lagaya taaki TypeError na aaye
     user = await db.user.find_unique(
         where={"id": user_id},
         include={"profile": True}
     )
+    
     if not user or not user.profile:
-        raise HTTPException(status_code=404, detail="User profile not completed")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="User profile not completed"
+        )
 
-    p = user.profile
+    # Prisma Python Client ke hisab se dot (.) notation use karenge
+    profile = user.profile
+    my_gender = getattr(profile, "gender", None)
+    interested_in = getattr(profile, "interestedIn", None)
 
-    # 2. Exclude already interacted users (liked/disliked) + self
-    interacted = await db.interaction.find_many(where={"fromUserId": user_id})
-    interacted_ids = [i.toUserId for i in interacted]
-    interacted_ids.append(user_id)
+    # 2. Opposite Gender Logic
+    if not interested_in or len(interested_in) == 0:
+        if my_gender == "MALE":
+            interested_in = ["FEMALE"]
+        elif my_gender == "FEMALE":
+            interested_in = ["MALE"]
+        else:
+            interested_in = []
 
-    # 3. Gender Filter
+    # Gender filter structure setup
     gender_filter = {}
-    if p.interestedIn and len(p.interestedIn) > 0:
-        gender_filter = {"gender": {"in": p.interestedIn}}
+    if interested_in:
+        gender_filter = {"gender": {"in": interested_in}}
 
-    # 4. Fetch Candidates (only gender + interacted filter applied)
-    candidates = await db.user.find_many(
-        where={
-            "id": {"not_in": interacted_ids},
-            "status": "ACTIVE",
-            "profile": {
-                "is": {
-                    **gender_filter
-                }
-            }
-        },
+    # 3. Interacted users ki list fetch karo
+    interacted = await db.interaction.find_many(
+        where={"fromUserId": user_id}
+    )
+    
+    interacted_ids = {i.toUserId for i in interacted if hasattr(i, 'toUserId')}
+    interacted_ids.add(user_id) 
+    interacted_list = list(interacted_ids)
+
+    # 4. Main Query Condition (Relation filtering without "is" keyword)
+    where_condition = {
+        "id": {"not_in": interacted_list},
+        "status": "ACTIVE"
+    }
+    
+    if gender_filter:
+        where_condition["profile"] = gender_filter
+
+    # 5. Parallel Execution (Fast performance ke liye)
+    count_task = db.user.count(where=where_condition)
+    candidates_task = db.user.find_many(
+        where=where_condition,
         include={
             "profile": True,
             "photos": {"take": 5},
@@ -348,14 +371,15 @@ async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):
         take=take
     )
 
+    total_count, candidates = await asyncio.gather(count_task, candidates_task)
+
+    # 6. JSON output structure formatting
     final_list = [{"user": cand} for cand in candidates]
 
     return {
         "recommendations": final_list,
-        "total": len(final_list)
+        "total": total_count
     }
-    
-
 
 
 
