@@ -1,9 +1,13 @@
 from fastapi import APIRouter, HTTPException
 from db import db
 from ai_utils import ai_client
-from ai_insights import generate_match_insight
+from ai_insights import generate_match_insight,bio_generation
 from typing import Optional
+from pydantic import BaseModel
 
+class BioRequest(BaseModel):
+    text: str
+    
 router = APIRouter(tags=["ai"])
 
 @router.on_event("startup")
@@ -113,4 +117,27 @@ async def verify_photo(photo_id: int):
         "photoId": photo_id,
         "aiResult": result,
         "updatedPhoto": updated_photo
+    }
+
+@router.post("/ai/biosuggestion/{sender_id}")
+async def get_bio_suggestion(sender_id: int, body: BioRequest):
+    u1 = await db.user.find_unique(
+        where={"id": sender_id},
+        include={
+            "profile": True,
+            "responses": {
+                "include": {"option": True}
+            }
+        }
+    )
+
+    if not u1:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    result = await bio_generation(u1, body.text)
+
+    return {
+        "sender_id": sender_id,
+        "text": body.text,
+        "result": result
     }

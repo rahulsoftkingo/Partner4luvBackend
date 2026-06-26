@@ -157,3 +157,64 @@ def calculate_match_score(user1_tags: list, user2_tags: list):
         return 50
 
     return round((intersection / union) * 100)
+  
+  
+""" Generates AI-based dating bios and suggested tags based on user requirements. """
+async def bio_generation(user_requirements: str):
+    try:
+        if not user_requirements.strip():
+            raise ValueError("User requirements text cannot be empty")
+
+        prompt = f"""
+The user wants a dating application bio based on the following requirements:
+"{user_requirements}"
+
+Generate three distinct variations of the bio:
+1. Casual & Fun (witty, lighthearted)
+2. Detailed & Authentic (meaningful, expressive)
+3. Short & Punchy (minimalist, engaging)
+
+Also, suggest 5 relevant interest/lifestyle tags based on their input.
+
+Return ONLY valid JSON in the following format:
+
+{{
+  "variations": {{
+    "casual": "Text for casual bio variation...",
+    "authentic": "Text for detailed/authentic bio variation...",
+    "short": "Text for short/punchy bio variation..."
+  }},
+  "suggestedTags": ["Tag1", "Tag2", "Tag3", "Tag4", "Tag5"]
+}}
+
+Do not include markdown, explanations, or any text outside the JSON.
+"""
+
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"},
+            max_tokens=800
+        )
+
+        content = response.choices[0].message.content
+
+        if not content:
+            raise ValueError("Empty response from OpenAI")
+
+        return json.loads(content)
+
+    except Exception as e:
+        print("Bio Generation Error:", str(e))
+
+        # Fallback response in case of API failure
+        return {
+            "variations": {
+                "casual": f"Living life to the fullest! Down for new adventures and great conversation. {user_requirements}",
+                "authentic": f"Looking to connect with genuine people. I value honesty, good energy, and shared experiences. {user_requirements}",
+                "short": f"Adventure seeker. Let's grab coffee. {user_requirements}"
+            },
+            "suggestedTags": ["Dating", "Lifestyle", "Connections", "Friendly", "Introvert"]
+        }
