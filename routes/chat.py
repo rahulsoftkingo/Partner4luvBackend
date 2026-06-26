@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import os
 import uuid
 from fastapi import UploadFile
+import asyncio
 # import whisper
 import os
 
@@ -84,7 +85,7 @@ async def get_conversations(user_id: int):
 @router.get("/messages/{match_id}")
 async def get_messages(match_id: int, my_id: int, skip: int = 0, take: int = 50):
     
-    # 1. Ensure conversation exists
+    # 1. Fetch only the conversation ID (Lightweight query)
     match = await db.match.find_unique(
         where={"id": match_id},
         include={"conversation": True}
@@ -94,27 +95,40 @@ async def get_messages(match_id: int, my_id: int, skip: int = 0, take: int = 50)
         raise HTTPException(status_code=404, detail="Match not found")
     
     if not match.conversation:
-        return {status:200,"messages": []}
+        return {"status": 200, "messages": []}
 
-    # 2. Mark messages as read (those sent by the other person)
-    await db.message.update_many(
-        where={
-            "conversationId": match.conversation.id,
-            "senderId": {"not": my_id},
-            "isRead": False
-        },
-        data={"isRead": True}
-    )
+    conversation_id = match.conversation.id
 
+    # 2. FIX: Fetch messages FIRST, don't make the user wait for the update
     messages = await db.message.find_many(
-        where={"conversationId": match.conversation.id},
+        where={"conversationId": conversation_id},
         order={"createdAt": "desc"},
         skip=skip,
         take=take,
         include={"sender": True}
     )
+
+    # 3. FIX: Run the heavy 'update_many' in the background.
+    # We use asyncio.create_task so the API returns the messages IMMEDIATELY 
+    # to the user while the database updates the 'isRead' status in the background.
+    async def mark_as_read_background():
+        try:
+            await db.message.update_many(
+                where={
+                    "conversationId": conversation_id,
+                    "senderId": {"not": my_id},
+                    "isRead": False
+                },
+                data={"isRead": True}
+            )
+        except Exception as e:
+            # Log the error here if needed, but don't crash the user's request
+            pass
+
+    asyncio.create_task(mark_as_read_background())
     
-    return {"messages": messages[::-1]} # Return in chronological order
+    # 4. Return the messages instantly
+    return {"messages": messages[::-1]}
 
 @router.post("/messages/send")
 async def send_message(data: MessageSendRequest):
