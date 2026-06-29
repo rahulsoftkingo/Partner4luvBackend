@@ -174,8 +174,6 @@ Generate three distinct variations of the bio:
 2. Detailed & Authentic (meaningful, expressive)
 3. Short & Punchy (minimalist, engaging)
 
-Also, suggest 5 relevant interest/lifestyle tags based on their input.
-
 Return ONLY valid JSON in the following format:
 
 {{
@@ -183,8 +181,7 @@ Return ONLY valid JSON in the following format:
     "casual": "Text for casual bio variation...",
     "authentic": "Text for detailed/authentic bio variation...",
     "short": "Text for short/punchy bio variation..."
-  }},
-  "suggestedTags": ["Tag1", "Tag2", "Tag3", "Tag4", "Tag5"]
+  }}
 }}
 
 Do not include markdown, explanations, or any text outside the JSON.
