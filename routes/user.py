@@ -2,6 +2,7 @@ import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Union
+from enum import Enum
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
@@ -61,6 +62,10 @@ class UserResponsesRequest(BaseModel):
     userId: int
     responses: list[UserResponseItem]
 
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str 
 
 class ProfileSetupRequest(BaseModel):
     userId: int
@@ -129,6 +134,23 @@ class ResetPasswordRequest(BaseModel):
 class QuoteCreate(BaseModel):
     userId: int
     text: str
+    
+
+class BlockUserRequest(BaseModel):
+    block_status: bool
+    
+
+
+# Defining Enum matching your Prisma schema for strict validation
+class NotificationTypeEnum(str, Enum):
+    MESSAGES = "MESSAGES"
+    CRUSHES = "CRUSHES"
+    SUPERLIKE = "SUPERLIKE"
+    LIKE = "LIKE"
+    
+class UpdateNotificationPreferencesRequest(BaseModel):
+    # This ensures frontend only sends valid types present in your enum
+    preferences: List[NotificationTypeEnum]
 
 
 # --- Routes ---
@@ -841,3 +863,109 @@ async def get_user_photos(user_id: int):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
+"""
+Toggle a user's block status.
+- **user_id**: The ID of the user to block/unblock
+- **block_status**: True to block, False to unblock
+"""  
+@router.post("/block/{user_id}")  # <-- Method POST ho gaya aur shuru mein '/' laga diya
+async def toggle_user_block(user_id: int, data: BlockUserRequest):  # <-- data parameter add kiya
+    # 1. Check if the user exists
+    user = await db.user.find_unique(where={"id": user_id})
+    if not user:
+        raise HTTPException(
+            status_code=404, 
+            detail="User not found"
+        )
+    
+    # 2. Update the isBlock field using JSON body data
+    await db.user.update(
+        where={"id": user_id},
+        data={"isBlock": data.block_status}  # <-- data.block_status se value ayegi
+    )
+    
+    # 3. Dynamic success message
+    action = "blocked" if data.block_status else "unblocked"
+    return {"message": f"User has been successfully {action}."}
+
+
+
+@router.post("/change-password/{user_id}")
+async def change_password(user_id: int, data: ChangePasswordRequest):
+    try:
+        # 1. Check if the user exists
+        user = await db.user.find_unique(where={"id": user_id})
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, 
+                detail="User not found"
+            )
+            
+        # 2. Verify Old Password
+        is_password_correct = verify_password(data.old_password, user.password)
+        if not is_password_correct:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Incorrect old password"
+            )
+            
+        # 3. Hash the new password
+        hashed_new_password = get_password_hash(data.new_password)
+        
+        # 4. Update the password in the database
+        await db.user.update(
+            where={"id": user_id},
+            data={"password": hashed_new_password}
+        )
+        
+        # 5. Return success message
+        return {"message": "Password has been successfully changed."}
+
+    except HTTPException as http_ex:
+        # Forward the manually raised HTTP exceptions without modification
+        raise http_ex
+
+    except Exception as e:
+        # Log unexpected errors (e.g., DB connection issues) for debugging
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Something went wrong on our side. Please try again later."
+        )
+
+
+@router.post("/notification-settings/{user_id}")
+async def update_notification_preferences(user_id: int, data: UpdateNotificationPreferencesRequest):
+    try:
+        # 1. Check if the user exists in the database
+        user = await db.user.find_unique(where={"id": user_id})
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, 
+                detail="User not found"
+            )
+        
+        # 2. Update the allowedNotificationTypes array directly in the User table
+        updated_user = await db.user.update(
+            where={"id": user_id},
+            data={
+                "allowedNotificationTypes": data.preferences
+            }
+        )
+        
+        # 3. Return the updated preferences list back to the frontend
+        return {
+            "message": "Notification preferences updated successfully.",
+            "allowedNotificationTypes": updated_user.allowedNotificationTypes
+        }
+
+    except HTTPException as http_ex:
+        # Forward manually handled HTTP exceptions (like 404 User Not Found)
+        raise http_ex
+
+    except Exception as e:
+        # Catch unexpected runtime or database connection crashes safely
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred on the server while updating preferences."
+        )

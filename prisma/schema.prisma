@@ -1,6 +1,6 @@
 generator client {
   provider             = "prisma-client-py"
-  output               = "../venv/lib/python3.12/site-packages/prisma"
+  output               = "../venv/Lib/site-packages/prisma"
   recursive_type_depth = 5
 }
 datasource db {
@@ -48,8 +48,9 @@ model User {
   matchSettings        UserMatchSetting?
   responses            UserResponse[]
   quotes               Quote[]
-  fcmToken             String?             
-
+  fcmToken             String?              
+  isBlock              Boolean?             
+  allowedNotificationTypes    NotificationType[]   @default([MESSAGES,CRUSHES,SUPERLIKE,LIKE])
   @@unique([socialProvider, socialId])
 }
 
@@ -321,10 +322,17 @@ model UserMatchSetting {
   user        User    @relation(fields: [userId], references: [id])
 }
 
+enum NotificationType {
+  MESSAGES      // For password change, login alerts
+  CRUSHES       // For block/unblock, profile updates
+  SUPERLIKE     // For offers, newsletter
+  LIKE        // For maintenance alerts, system updates
+}
+
 model Notification {
   id        Int      @id @default(autoincrement())
   message   String
-  type      String
+  type      NotificationType?
   status    String   @default("PENDING")
   recipient String
   userId    Int?
