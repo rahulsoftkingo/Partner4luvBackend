@@ -218,3 +218,64 @@ Do not include markdown, explanations, or any text outside the JSON.
             },
             "suggestedTags": ["Dating", "Lifestyle", "Connections", "Friendly", "Introvert"]
         }
+        
+        
+        
+
+""" Analyzes a list of QA dictionaries and returns a structured personality profile. """
+async def analyze_personality(qa_data: list):
+    
+    try:
+        # Convert list of dicts to a formatted string for the prompt
+        qa_text = "\n".join([f"Q: {item['question']}\nA: {item['answer']}" for item in qa_data])
+
+        prompt = f"""
+Analyze the following questionnaire responses to determine the user's personality traits.
+
+Data:
+{qa_text}
+
+Return ONLY valid JSON in the following format:
+{{
+  "your personality": "A descriptive analysis of the user's personality.",
+  "how empathetic are you": {{
+    "insight": "Detailed text analysis about empathy",
+    "percentage": 85
+  }},
+  "How do you process experience": {{
+    "insight": "Detailed text analysis about processing experiences",
+    "percentage": 70
+  }},
+  "your idea level of closeness": {{
+    "insight": "Detailed text analysis about relationship intimacy",
+    "percentage": 90
+  }},
+  "How do you view the world?": {{
+    "insight": "Detailed text analysis about their worldview",
+    "percentage": 65
+  }}
+}}
+
+Do not include markdown, explanations, or any text outside the JSON.
+"""
+
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            max_tokens=800
+        )
+
+        content = response.choices[0].message.content
+        return json.loads(content)
+
+    except Exception as e:
+        print("Personality Analysis Error:", str(e))
+        # Fallback in case of failure
+        return {
+            "your personality": "Balanced and thoughtful.",
+            "how empathetic are you": "Moderate - 50%",
+            "How do you process experience": "Logical - 50%",
+            "your idea level of closeness": "Balanced - 50%",
+            "How do you view the world?": "Realistic - 50%"
+        }

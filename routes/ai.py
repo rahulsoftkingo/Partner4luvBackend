@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from db import db
 from ai_utils import ai_client
-from ai_insights import generate_match_insight,bio_generation
+from ai_insights import generate_match_insight,bio_generation,analyze_personality
 from typing import Optional
 from pydantic import BaseModel
 
@@ -118,6 +118,47 @@ async def verify_photo(photo_id: int):
         "aiResult": result,
         "updatedPhoto": updated_photo
     }
+   
+
+@router.get("/ai/personalityinsight/{sender_id}")
+async def personality_insight(sender_id: int):
+    ans = []
+    
+    # 1. Fetch user data along with nested relations from DB
+    user = await db.user.find_unique(
+        where={"id": sender_id},
+        include={
+            "profile": True,
+            "responses": {
+                "include": {
+                    "option": True,
+                    "question": True
+                }
+            }
+        }
+    )
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # 2. Format the database responses into the list of dicts required by AI
+    for ele in user.responses:
+        # Checking to make sure question and option data exists to prevent errors
+        if ele.question and ele.option:
+            var = {
+                "question": ele.question.text,
+                "answer": ele.option.text
+            }
+            ans.append(var)
+            
+    if not ans:
+        raise HTTPException(status_code=400, detail="User has not answered any questions yet.")
+
+    # 3. Pass the formatted list to your AI function
+    ai_insight = await analyze_personality(ans)
+    
+    # 4. Return the final structured AI analysis
+    return ai_insight
 
 @router.post("/ai/biosuggestion/{sender_id}")
 async def get_bio_suggestion(sender_id: int, body: BioRequest):
