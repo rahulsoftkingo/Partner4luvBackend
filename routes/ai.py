@@ -160,6 +160,7 @@ async def personality_insight(sender_id: int):
     # 4. Return the final structured AI analysis
     return ai_insight
 
+
 @router.post("/ai/biosuggestion/{sender_id}")
 async def get_bio_suggestion(sender_id: int, body: BioRequest):
     u1 = await db.user.find_unique(
@@ -175,7 +176,7 @@ async def get_bio_suggestion(sender_id: int, body: BioRequest):
     if not u1:
         raise HTTPException(status_code=404, detail="User not found")
 
-    result = await bio_generation(u1, body.text)
+    result = await bio_generation(body.text)
 
     return {
         "sender_id": sender_id,
