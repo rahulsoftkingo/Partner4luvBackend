@@ -34,6 +34,9 @@ class CallInviteRequest(BaseModel):
 class CallInviteResponse(BaseModel):
     message: str
     fcmMessageId: str
+    
+class FcmTokenRequest(BaseModel):
+    fcmToken: str
 
 
 @router.post("/push/call-invite",response_model=CallInviteResponse,status_code=status.HTTP_200_OK,)
@@ -160,6 +163,55 @@ async def send_call_invite(payload: CallInviteRequest):
         message="Notification sent successfully",
         fcmMessageId=fcm_message_id,
     )
-    
+
+
+@router.post("/user/{user_id}/fcm-token")
+async def update_fcm_token(user_id: int, fcmToken: str):
+
+    # 1. Check user exist karta hai ya nahi
+    try:
+        user = await db.user.find_unique(where={"id": user_id})
+    except Exception as e:
+        print(f"USER LOOKUP ERROR: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to look up user: {type(e).__name__}: {str(e)}",
+        )
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    # 2. Token clean karo
+    clean_token = fcmToken.strip()
+
+    if not clean_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="FCM token cannot be empty",
+        )
+
+    # 3. Database me update karo
+    try:
+        updated_user = await db.user.update(
+            where={"id": user_id},
+            data={"fcmToken": clean_token},
+        )
+    except Exception as e:
+        print(f"FCM TOKEN UPDATE ERROR for user {user_id}: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update FCM token: {type(e).__name__}: {str(e)}",
+        )
+
+    print(f"FCM token updated for user {user_id}: {clean_token[:20]}...")
+
+    return {
+        "message": "FCM token updated successfully",
+        "userId": user_id,
+        "fcmToken": updated_user.fcmToken,
+    }
 # @router.post("/push/call-invite",response_model=CallInviteResponse,status_code=status.HTTP_200_OK,)
 # async def send_call_invite(payload: CallInviteRequest):
