@@ -157,6 +157,12 @@ async def personality_insight(sender_id: int):
     # 3. Pass the formatted list to your AI function
     ai_insight = await analyze_personality(ans)
     
+    #4. Update the profile match insight in user table 
+    updated_user = await db.user.update(
+        where={"id": user_id},
+        data={"personalityInsight": ai_insight}
+    )  
+    
     # 4. Return the final structured AI analysis
     return ai_insight
 

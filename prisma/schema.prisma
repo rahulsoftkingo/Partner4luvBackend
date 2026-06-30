@@ -36,6 +36,7 @@ model User {
   interactionsReceived Interaction[]        @relation("InteractionsTo")
   matchesAsUser1       Match[]              @relation("User1Matches")
   matchesAsUser2       Match[]              @relation("User2Matches")
+  personalityInsight   Json?
   messages             Message[]
   notifications        Notification[]
   payments             Payment[]
