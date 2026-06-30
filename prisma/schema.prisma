@@ -1,6 +1,6 @@
 generator client {
   provider             = "prisma-client-py"
-  output               = "../lib/python3.12/site-packages/prisma"
+  output               = "../venv/Lib/site-packages/prisma"
   recursive_type_depth = 5
 }
 datasource db {
@@ -83,6 +83,9 @@ model Profile {
   latitude           Float?
   longitude          Float?
   interestedIn       Gender[]
+  music              String[]     @default([])
+  movie              String[]     @default([])
+  book               String[]     @default([])
   minAgePref         Int?         @default(18)
   maxAgePref         Int?         @default(99)
   maxDistance        Int?         @default(50)
