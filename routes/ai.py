@@ -4,6 +4,7 @@ from ai_utils import ai_client
 from ai_insights import generate_match_insight,bio_generation,analyze_personality
 from typing import Optional
 from pydantic import BaseModel
+from prisma import Json
 
 class BioRequest(BaseModel):
     text: str
@@ -120,6 +121,8 @@ async def verify_photo(photo_id: int):
     }
    
 
+from prisma import Json  # ye import add karo top pe
+
 @router.get("/ai/personalityinsight/{sender_id}")
 async def personality_insight(sender_id: int):
     ans = []
@@ -143,7 +146,6 @@ async def personality_insight(sender_id: int):
 
     # 2. Format the database responses into the list of dicts required by AI
     for ele in user.responses:
-        # Checking to make sure question and option data exists to prevent errors
         if ele.question and ele.option:
             var = {
                 "question": ele.question.text,
@@ -156,16 +158,20 @@ async def personality_insight(sender_id: int):
 
     # 3. Pass the formatted list to your AI function
     ai_insight = await analyze_personality(ans)
-    
-    #4. Update the profile match insight in user table 
-    updated_user = await db.user.update(
-        where={"id": user_id},
-        data={"personalityInsight": ai_insight}
-    )  
-    
-    # 4. Return the final structured AI analysis
-    return ai_insight
 
+    # Agar ai_insight is string (AI model se raw text), to pehle dict me convert karo
+    if isinstance(ai_insight, str):
+        import json
+        ai_insight = json.loads(ai_insight)
+
+    # 4. Update the profile match insight in user table 
+    updated_user = await db.user.update(
+        where={"id": sender_id},
+        data={"personalityInsight": Json(ai_insight)}   # <-- yahi fix hai
+    )
+
+    # 5. Return the final structured AI analysis
+    return ai_insight
 
 @router.post("/ai/biosuggestion/{sender_id}")
 async def get_bio_suggestion(sender_id: int, body: BioRequest):
