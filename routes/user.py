@@ -151,6 +151,10 @@ class NotificationTypeEnum(str, Enum):
 class UpdateNotificationPreferencesRequest(BaseModel):
     # This ensures frontend only sends valid types present in your enum
     preferences: List[NotificationTypeEnum]
+    
+class StoreFcmTokenRequest(BaseModel):
+    userId:int
+    fcmtoken:str
 
 
 # --- Routes ---
@@ -933,6 +937,9 @@ async def change_password(user_id: int, data: ChangePasswordRequest):
             detail="Something went wrong on our side. Please try again later."
         )
 
+
+# @router.post("/storefcmtoken")
+# async def storefcmtoken(data:Storefcmtoken):
 
 @router.post("/notification-settings/{user_id}")
 async def update_notification_preferences(user_id: int, data: UpdateNotificationPreferencesRequest):
