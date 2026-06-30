@@ -161,5 +161,5 @@ async def send_call_invite(payload: CallInviteRequest):
         fcmMessageId=fcm_message_id,
     )
     
-@router.post("/push/call-invite",response_model=CallInviteResponse,status_code=status.HTTP_200_OK,)
-async def send_call_invite(payload: CallInviteRequest):
+# @router.post("/push/call-invite",response_model=CallInviteResponse,status_code=status.HTTP_200_OK,)
+# async def send_call_invite(payload: CallInviteRequest):
