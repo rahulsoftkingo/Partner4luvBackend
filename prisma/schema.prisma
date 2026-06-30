@@ -1,6 +1,6 @@
 generator client {
   provider             = "prisma-client-py"
-  output               = "../venv/lib/python3.12/site-packages/prisma"
+  output               = "../lib/python3.12/site-packages/prisma"
   recursive_type_depth = 5
 }
 datasource db {
@@ -126,6 +126,7 @@ model Photo {
   aiStatus     String   @default("PENDING")
   aiReason     String?
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  interactions Interaction[]
 }
 
 model Interaction {
@@ -134,12 +135,13 @@ model Interaction {
   toUserId   Int
   compliment String?
   quoteid    Int?
+  photoId    Int?
   type       InteractionType
   createdAt  DateTime        @default(now())
   fromUser   User            @relation("InteractionsFrom", fields: [fromUserId], references: [id])
   toUser     User            @relation("InteractionsTo", fields: [toUserId], references: [id])
-  quote      Quote?           @relation(fields: [quoteid], references: [id])
-
+  quote      Quote?          @relation(fields: [quoteid], references: [id])
+  photo      Photo?          @relation(fields: [photoId], references: [id])
   @@unique([fromUserId, toUserId])
 }
 
