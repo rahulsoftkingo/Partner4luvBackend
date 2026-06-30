@@ -164,36 +164,22 @@ async def send_call_invite(payload: CallInviteRequest):
         fcmMessageId=fcm_message_id,
     )
 
-
 @router.post("/user/{user_id}/fcm-token")
-async def update_fcm_token(user_id: int, fcmToken: str):
-
-    # 1. Check user exist karta hai ya nahi
+async def update_fcm_token(user_id: int, payload: FcmTokenRequest):
+    
     try:
         user = await db.user.find_unique(where={"id": user_id})
     except Exception as e:
         print(f"USER LOOKUP ERROR: {type(e).__name__}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to look up user: {type(e).__name__}: {str(e)}",
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to look up user: {str(e)}")
 
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
+        raise HTTPException(status_code=404, detail="User not found")
 
-    # 2. Token clean karo
-    clean_token = fcmToken.strip()
-
+    clean_token = payload.fcmToken.strip()
     if not clean_token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="FCM token cannot be empty",
-        )
+        raise HTTPException(status_code=400, detail="FCM token cannot be empty")
 
-    # 3. Database me update karo
     try:
         updated_user = await db.user.update(
             where={"id": user_id},
@@ -201,12 +187,7 @@ async def update_fcm_token(user_id: int, fcmToken: str):
         )
     except Exception as e:
         print(f"FCM TOKEN UPDATE ERROR for user {user_id}: {type(e).__name__}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update FCM token: {type(e).__name__}: {str(e)}",
-        )
-
-    print(f"FCM token updated for user {user_id}: {clean_token[:20]}...")
+        raise HTTPException(status_code=500, detail=f"Failed to update FCM token: {str(e)}")
 
     return {
         "message": "FCM token updated successfully",
