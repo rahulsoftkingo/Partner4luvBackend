@@ -1,15 +1,24 @@
-from fastapi import APIRouter, HTTPException
-from db import db
-from ai_utils import ai_client
-from ai_insights import generate_match_insight,bio_generation,analyze_personality
 from typing import Optional
 from pydantic import BaseModel
 from prisma import Json
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from db import db
+from ai_utils import ai_client
+from ai_insights import generate_match_insight, bio_generation, analyze_personality, transcribe_audio
 
+ 
+    
 class BioRequest(BaseModel):
     text: str
     
+    
 router = APIRouter(tags=["ai"])
+
+# Whisper accepts these audio formats
+ALLOWED_EXTENSIONS = {"mp3", "mp4", "mpeg", "mpga", "m4a", "wav", "webm", "ogg"}
+
+# Whisper API hard limit is 25 MB per file
+MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024
 
 @router.on_event("startup")
 async def startup():
@@ -195,3 +204,47 @@ async def get_bio_suggestion(sender_id: int, body: BioRequest):
         "text": body.text,
         "result": result
     }
+    
+
+@router.post("/ai/transcribe-voice")
+async def transcribe_voice_message(
+    audio: UploadFile = File(...),
+    messageId: Optional[int] = Form(None),  # optional: if provided, saves the text back onto the Message row
+    language: Optional[str] = Form(None),   # optional ISO-639-1 hint, e.g. "hi" or "en"
+):
+    # 1. If linked to a message, confirm it exists before spending an API call
+    # if messageId is not None:
+    #     message = await db.message.find_unique(where={"id": messageId})
+    #     if not message:
+    #         raise HTTPException(status_code=404, detail="Message not found")
+ 
+    # 2. Read the uploaded file
+    audio_bytes = await audio.read()
+ 
+    # 3. Call AI (main transcription logic lives in ai_insights.py)
+    try:
+        transcribed_text = await transcribe_audio(
+            audio_bytes=audio_bytes,
+            filename=audio.filename,
+            language=language
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+ 
+    # # 4. If linked to a message, save the transcript back onto that row
+    # if messageId is not None:
+    #     await db.message.update(
+    #         where={"id": messageId},
+    #         data={"transcribedText": transcribed_text}
+    #     )
+ 
+    return {
+        "messageId": messageId,
+        "transcribedText": transcribed_text
+    }
+ 
+
+
+ 

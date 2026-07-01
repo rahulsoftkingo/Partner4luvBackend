@@ -438,6 +438,7 @@ def _build_channel_name(match_id: int) -> str:
     return f"match_{match_id}"
 
 
+
 @router.post("/token")
 async def generate_agora_token(data: AgoraTokenRequest):
     if not AGORA_APP_ID or not AGORA_APP_CERTIFICATE:
@@ -505,6 +506,9 @@ async def generate_agora_token(data: AgoraTokenRequest):
         "expiresAt": privilege_expired_ts,
         "role": "PUBLISHER"
     }
+    
+    
+
 
 # @router.get("/recommendations/{user_id}")
 # async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):

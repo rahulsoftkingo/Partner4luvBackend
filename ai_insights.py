@@ -2,6 +2,7 @@ import os
 import json
 from dotenv import load_dotenv
 from openai import OpenAI
+from typing import Optional
 
 # Load .env file
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -9,6 +10,15 @@ dotenv_path = os.path.join(base_dir, ".env")
 load_dotenv(dotenv_path)
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+_whisper_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY")) if os.getenv("OPENAI_API_KEY") else None
+
+
+# Whisper accepts these audio formats
+ALLOWED_AUDIO_EXTENSIONS = {"mp3", "mp4", "mpeg", "mpga", "m4a", "wav", "webm", "ogg"}
+ 
+# Whisper API hard limit is 25 MB per file
+MAX_AUDIO_FILE_SIZE_BYTES = 25 * 1024 * 1024
 
 """ Generates AI-based compatibility insight between two users. """
 async def generate_match_insight(user1_data: dict, user2_data: dict):
@@ -276,3 +286,53 @@ Do not include markdown, explanations, or any text outside the JSON.
             "your idea level of closeness": "Balanced - 50%",
             "How do you view the world?": "Realistic - 50%"
         }
+        
+        
+
+async def transcribe_audio(
+    audio_bytes: bytes,
+    filename: str,
+    language: Optional[str] = None
+) -> str:
+    """
+    Transcribes a voice message into text using OpenAI's Whisper API.
+ 
+    Args:
+        audio_bytes: Raw bytes of the audio file.
+        filename: Original filename (used so Whisper can infer the format).
+        language: Optional ISO-639-1 hint (e.g. "hi", "en"). If None,
+                  Whisper auto-detects the spoken language.
+ 
+    Returns:
+        The transcribed text.
+ 
+    Raises:
+        ValueError: If the file extension or size is invalid.
+        RuntimeError: If the OpenAI client isn't configured, or the API call fails.
+    """
+    if not _whisper_client:
+        raise RuntimeError("OpenAI credentials not configured on server")
+ 
+    file_ext = (filename or "").split(".")[-1].lower()
+    if file_ext not in ALLOWED_AUDIO_EXTENSIONS:
+        raise ValueError(
+            f"Unsupported audio format. Allowed: {', '.join(sorted(ALLOWED_AUDIO_EXTENSIONS))}"
+        )
+ 
+    if len(audio_bytes) == 0:
+        raise ValueError("Uploaded audio file is empty")
+ 
+    if len(audio_bytes) > MAX_AUDIO_FILE_SIZE_BYTES:
+        raise ValueError("Audio file exceeds 25 MB limit")
+ 
+    try:
+        transcript = _whisper_client.audio.transcriptions.create(
+            model="whisper-1",
+            file=(filename, audio_bytes),
+            language=language,
+        )
+    except Exception as e:
+        raise RuntimeError(f"Transcription failed: {str(e)}")
+ 
+    return transcript.text
+ 
