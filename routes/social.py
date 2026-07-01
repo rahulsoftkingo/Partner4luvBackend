@@ -4,6 +4,11 @@ from typing import Optional
 from pydantic import BaseModel
 from db import db
 from datetime import datetime, timezone
+import os
+import time
+from agora_token_builder import RtcTokenBuilder
+
+from db import db
 
 router = APIRouter(prefix="/social", tags=["social"])
 
@@ -384,6 +389,122 @@ async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):
     }
 
 
+"""
+Agora Dynamic RTC Token Generator API
+--------------------------------------
+For production: generates a dynamic Agora RTC token for the current user
+(caller) every time a call is initiated, and returns it to the client.
+
+Install dependency (also add to production requirements.txt):
+    pip install agora-token-builder
+
+Environment variables required (.env / server config):
+    AGORA_APP_ID          -> App ID from the Agora Console
+    AGORA_APP_CERTIFICATE -> Primary Certificate from the Agora Console
+                              (certificate must be enabled for dynamic
+                              tokens to work)
+"""
+
+
+# ---------------------------------------------------------------------
+# Config (comes from environment variables, never hardcode credentials)
+# ---------------------------------------------------------------------
+AGORA_APP_ID = os.getenv("AGORA_APP_ID")
+AGORA_APP_CERTIFICATE = os.getenv("AGORA_APP_CERTIFICATE")
+
+# How long the token stays valid, in seconds. Default: 1 hour.
+DEFAULT_TOKEN_EXPIRY_SECONDS = 3600
+
+# Agora roles
+ROLE_PUBLISHER = 1  # broadcaster / can send + receive audio-video
+ROLE_SUBSCRIBER = 2  # can only receive
+
+
+class AgoraTokenRequest(BaseModel):
+    fromUserId: int                     # current logged-in user (caller / joiner)
+    matchId: int                        # the dating-app match this call is against (Match.id is Int in schema)
+    channelName: Optional[str] = None   # optional override, otherwise derived from matchId
+
+
+@router.on_event("startup")
+async def startup():
+    if not db.is_connected():
+        await db.connect()
+
+
+def _build_channel_name(match_id: int) -> str:
+    # Both users (caller/callee) join this same channel name,
+    # so it must be deterministic — derived from matchId.
+    return f"match_{match_id}"
+
+
+@router.post("/token")
+async def generate_agora_token(data: AgoraTokenRequest):
+    if not AGORA_APP_ID or not AGORA_APP_CERTIFICATE:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Agora credentials not configured on server"
+        )
+
+    # 1. Validate the user
+    user = await db.user.find_unique(where={"id": data.fromUserId})
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    # 2. Validate the match and confirm this user is actually part of it
+    match = await db.match.find_unique(where={"id": data.matchId})
+    if not match:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Match not found"
+        )
+
+    if data.fromUserId not in (match.user1Id, match.user2Id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not part of this match, cannot join call"
+        )
+
+    if match.status != "ACTIVE":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Match is not active, cannot start a call"
+        )
+
+    # 3. Decide the channel name (both users will meet on this same channel)
+    channel_name = data.channelName or _build_channel_name(data.matchId)
+
+    # 4. Calculate token expiry
+    current_ts = int(time.time())
+    privilege_expired_ts = current_ts + DEFAULT_TOKEN_EXPIRY_SECONDS
+
+    # 5. Generate the Agora dynamic RTC token (uid = fromUserId)
+    try:
+        token = RtcTokenBuilder.buildTokenWithUid(
+            AGORA_APP_ID,
+            AGORA_APP_CERTIFICATE,
+            channel_name,
+            data.fromUserId,
+            ROLE_PUBLISHER,
+            privilege_expired_ts
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate Agora token: {str(e)}"
+        )
+
+    return {
+        "appId": AGORA_APP_ID,
+        "channelName": channel_name,
+        "uid": data.fromUserId,
+        "token": token,
+        "expiresAt": privilege_expired_ts,
+        "role": "PUBLISHER"
+    }
 
 # @router.get("/recommendations/{user_id}")
 # async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):
