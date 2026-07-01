@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import os
 import time
 from agora_token_builder import RtcTokenBuilder
+from prisma.errors import ForeignKeyViolationError, UniqueViolationError, PrismaError
 
 from db import db
 
@@ -25,6 +26,9 @@ async def startup():
     if not db.is_connected():
         await db.connect()
 
+
+
+
 @router.post("/interact")
 async def interact(data: InteractionRequest):
     if data.fromUserId == data.toUserId:
@@ -34,9 +38,12 @@ async def interact(data: InteractionRequest):
         )
 
     # 1. Enforce Swipe Limits based on User's Persistent Limit
-    user = await db.user.find_unique(
-        where={"id": data.fromUserId}
-    )
+    try:
+        user = await db.user.find_unique(
+            where={"id": data.fromUserId}
+        )
+    except PrismaError as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching user: {str(e)}")
 
     if not user:
         raise HTTPException(
@@ -55,13 +62,16 @@ async def interact(data: InteractionRequest):
         microsecond=0
     )
 
-    swipe_count = await db.interaction.count(
-        where={
-            "fromUserId": data.fromUserId,
-            "type": {"in": ["LIKE", "SUPERLIKE"]},
-            "createdAt": {"gte": today}
-        }
-    )
+    try:
+        swipe_count = await db.interaction.count(
+            where={
+                "fromUserId": data.fromUserId,
+                "type": {"in": ["LIKE", "SUPERLIKE"]},
+                "createdAt": {"gte": today}
+            }
+        )
+    except PrismaError as e:
+        raise HTTPException(status_code=500, detail=f"Error counting swipes: {str(e)}")
 
     if swipe_count >= limit:
         raise HTTPException(
@@ -70,27 +80,44 @@ async def interact(data: InteractionRequest):
         )
 
     # 2. Save or Update Interaction
-    interaction = await db.interaction.upsert(
-        where={
-            "fromUserId_toUserId": {
-                "fromUserId": data.fromUserId,
-                "toUserId": data.toUserId
-            }
-        },
-        data={
-            "create": {
-                "fromUserId": data.fromUserId,
-                "toUserId": data.toUserId,
-                "type": data.type,
-                "compliment":data.compliment,
-                "quoteid":data.quoteid,
-                "photoId":data.photoid
+    try:
+        interaction = await db.interaction.upsert(
+            where={
+                "fromUserId_toUserId": {
+                    "fromUserId": data.fromUserId,
+                    "toUserId": data.toUserId
+                }
             },
-            "update": {
-                "type": data.type
+            data={
+                "create": {
+                    "fromUserId": data.fromUserId,
+                    "toUserId": data.toUserId,
+                    "type": data.type,
+                    "compliment": data.compliment,
+                    "quoteid": data.quoteid,
+                    "photoId": data.photoid
+                },
+                "update": {
+                    "type": data.type
+                }
             }
-        }
-    )
+        )
+    except ForeignKeyViolationError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid reference in interaction data "
+                f"(check photoId='{data.photoid}', fromUserId='{data.fromUserId}', "
+                f"toUserId='{data.toUserId}'): {str(e)}"
+            )
+        )
+    except UniqueViolationError as e:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Duplicate interaction conflict: {str(e)}"
+        )
+    except PrismaError as e:
+        raise HTTPException(status_code=500, detail=f"Database error saving interaction: {str(e)}")
 
     # 3. Handle DISLIKE immediately
     if data.type == "DISLIKE":
@@ -101,14 +128,17 @@ async def interact(data: InteractionRequest):
         }
 
     # 4. Check reverse interaction for LIKE/SUPERLIKE
-    reverse_interaction = await db.interaction.find_unique(
-        where={
-            "fromUserId_toUserId": {
-                "fromUserId": data.toUserId,
-                "toUserId": data.fromUserId
+    try:
+        reverse_interaction = await db.interaction.find_unique(
+            where={
+                "fromUserId_toUserId": {
+                    "fromUserId": data.toUserId,
+                    "toUserId": data.fromUserId
+                }
             }
-        }
-    )
+        )
+    except PrismaError as e:
+        raise HTTPException(status_code=500, detail=f"Error checking reverse interaction: {str(e)}")
 
     # No reverse interaction yet
     if not reverse_interaction:
@@ -129,36 +159,39 @@ async def interact(data: InteractionRequest):
     # Mutual LIKE / SUPERLIKE => Match
     if reverse_interaction.type in ["LIKE", "SUPERLIKE"]:
 
-        match = await db.match.upsert(
-            where={
-                "user1Id_user2Id": {
-                    "user1Id": min(
-                        data.fromUserId,
-                        data.toUserId
-                    ),
-                    "user2Id": max(
-                        data.fromUserId,
-                        data.toUserId
-                    )
-                }
-            },
-            data={
-                "create": {
-                    "user1Id": min(
-                        data.fromUserId,
-                        data.toUserId
-                    ),
-                    "user2Id": max(
-                        data.fromUserId,
-                        data.toUserId
-                    ),
-                    "status": "ACTIVE"
+        try:
+            match = await db.match.upsert(
+                where={
+                    "user1Id_user2Id": {
+                        "user1Id": min(
+                            data.fromUserId,
+                            data.toUserId
+                        ),
+                        "user2Id": max(
+                            data.fromUserId,
+                            data.toUserId
+                        )
+                    }
                 },
-                "update": {
-                    "status": "ACTIVE"
+                data={
+                    "create": {
+                        "user1Id": min(
+                            data.fromUserId,
+                            data.toUserId
+                        ),
+                        "user2Id": max(
+                            data.fromUserId,
+                            data.toUserId
+                        ),
+                        "status": "ACTIVE"
+                    },
+                    "update": {
+                        "status": "ACTIVE"
+                    }
                 }
-            }
-        )
+            )
+        except PrismaError as e:
+            raise HTTPException(status_code=500, detail=f"Error creating match: {str(e)}")
 
         return {
             "message": "Interaction saved",
@@ -172,9 +205,9 @@ async def interact(data: InteractionRequest):
         "message": "Interaction saved",
         "isMatch": False,
         "reason": "Match conditions not satisfied",
-        "complimentFromUser1toUser2" : data.compliment
+        "complimentFromUser1toUser2": data.compliment
     }
-
+    
 @router.get("/interests/{user_id}")
 async def get_user_matches(user_id: int):
     matches = await db.match.find_many(
@@ -508,7 +541,7 @@ async def generate_agora_token(data: AgoraTokenRequest):
     }
     
     
-
+# @router.post("/token/subscribe")
 
 # @router.get("/recommendations/{user_id}")
 # async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):

@@ -3,17 +3,12 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Union
 from enum import Enum
-
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-
+from prisma.errors import PrismaError
 # Supposing verify_refresh_token lives here based on your architecture
-from auth_utils import (
-    create_access_token,
-    get_password_hash,
-    verify_password
-)
+from auth_utils import (create_access_token, get_password_hash, verify_password)
 from db import db
 from prisma import Json
 from utils.token import create_refresh_token
@@ -156,6 +151,15 @@ class StoreFcmTokenRequest(BaseModel):
     userId:int
     fcmtoken:str
 
+
+class TextResponseItem(BaseModel):
+    questionId: str
+    textResponse: str
+
+
+class UserTextResponsesRequest(BaseModel):
+    userId: str
+    responses: List[TextResponseItem]
 
 # --- Routes ---
 
@@ -895,6 +899,21 @@ async def toggle_user_block(user_id: int, data: BlockUserRequest):  # <-- data p
 
 
 
+""" Delete a user account permanently. - **user_id**: The ID of the user to delete """
+@router.delete("/delete/{user_id}")
+async def delete_user_account(user_id: int):
+    user = await db.user.find_unique(where={"id": user_id})
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found"
+        )
+    await db.user.delete(where={"id": user_id})
+    return {"message": "User account has been successfully deleted."}
+
+
+
+
 @router.post("/change-password/{user_id}")
 async def change_password(user_id: int, data: ChangePasswordRequest):
     try:
@@ -976,3 +995,128 @@ async def update_notification_preferences(user_id: int, data: UpdateNotification
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred on the server while updating preferences."
         )
+
+
+# api for edit the answer of the question which is of text type show in the user profile
+@router.post("/onboarding/text-responses")
+async def save_text_responses(data: UserTextResponsesRequest):
+    if not data.responses:
+        raise HTTPException(status_code=400, detail="No responses provided")
+    question_ids = [r.questionId for r in data.responses]
+    try:
+        async with db.tx() as transaction:
+            await transaction.userresponse.delete_many(
+                where={
+                    "userId": data.userId,
+                    "questionId": {"in": question_ids}
+                }
+            )
+            await transaction.userresponse.create_many(
+                data=[
+                    {
+                        "userId": data.userId,
+                        "questionId": item.questionId,
+                        "textResponse": item.textResponse,
+                        "optionId": None
+                    }
+                    for item in data.responses
+                ]
+            )
+
+    except PrismaError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error saving text responses: {str(e)}"
+        )
+
+    return {"message": "Text responses saved successfully"}
+
+
+
+"""
+    Returns profiles of users who LIKE/SUPERLIKE'd `user_id`,
+    where `user_id` has NOT yet responded (liked, superliked, or disliked) to them.
+ 
+i.e. "Who liked me" — pending likes only.
+"""
+ 
+@router.get("/users/{user_id}/likes-received")
+async def get_likes_received(
+    user_id: int,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    """
+    Returns profiles of users who LIKE/SUPERLIKE'd `user_id`,
+    where `user_id` has NOT yet responded (liked, superliked, or disliked) to them.
+ 
+    i.e. "Who liked me" — pending likes only.
+    """
+ 
+    # 1. Validate user exists
+    try:
+        user = await db.user.find_unique(where={"id": user_id})
+    except PrismaError as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching user: {str(e)}")
+ 
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+ 
+    # 2. Get all userIds that `user_id` has already interacted with (any type)
+    #    so we can exclude them from the "pending likes" list.
+    try:
+        already_responded = await db.interaction.find_many(
+            where={"fromUserId": user_id},
+        )
+    except PrismaError as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching existing interactions: {str(e)}"
+        )
+ 
+    responded_ids = [row.toUserId for row in already_responded]
+ 
+    # 3. Get interactions where someone liked/superliked `user_id`,
+    #    excluding anyone `user_id` already responded to.
+    try:
+        pending_likes = await db.interaction.find_many(
+            where={
+                "toUserId": user_id,
+                "type": {"in": ["LIKE", "SUPERLIKE"]},
+                "fromUserId": {"notIn": responded_ids} if responded_ids else {},
+            },
+            order={"createdAt": "desc"},
+            take=limit,
+            skip=offset,
+            include={"fromUser": True},
+        )
+    except PrismaError as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching pending likes: {str(e)}"
+        )
+ 
+    # 4. Shape the response
+    results = []
+    for interaction in pending_likes:
+        liker = interaction.fromUser
+        if not liker:
+            continue  # defensive: skip if relation didn't resolve
+ 
+        results.append({
+            "userId": liker.id,
+            "name": getattr(liker, "name", None),
+            "photos": getattr(liker, "photos", None),
+            "bio": getattr(liker, "bio", None),
+            "interactionType": interaction.type,   # LIKE or SUPERLIKE
+            "compliment": interaction.compliment,
+            "quoteid": interaction.quoteid,
+            "photoId": interaction.photoId,
+            "likedAt": interaction.createdAt,
+        })
+ 
+    return {
+        "count": len(results),
+        "limit": limit,
+        "offset": offset,
+        "likes": results,
+    }
+ 
