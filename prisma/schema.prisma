@@ -114,6 +114,7 @@ model Profile {
   verifiedOnlyPref   Boolean?     @default(false)
   lat                Float?
   lng                Float?
+  prompts            Json?        @default("[]")
   user               User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 

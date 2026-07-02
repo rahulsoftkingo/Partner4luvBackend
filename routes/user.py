@@ -3,6 +3,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Union
 from enum import Enum
+from typing import Literal
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -161,6 +162,15 @@ class UserTextResponsesRequest(BaseModel):
     userId: str
     responses: List[TextResponseItem]
 
+class UpdatePromptKeyRequest(BaseModel):
+    userId: int
+    index: int          # 0, 1, 2 -> teen slots
+    key: str
+
+class UpdatePromptAnswerRequest(BaseModel):
+    userId: int
+    index: int
+    answer: str
 # --- Routes ---
 
 
@@ -1119,4 +1129,47 @@ async def get_likes_received(
         "offset": offset,
         "likes": results,
     }
+    
+@router.post("/profile/prompt/key")
+async def update_prompt_key(data: UpdatePromptKeyRequest):
+    profile = await db.profile.find_unique(where={"userId": data.userId})
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    prompts = profile.prompts or []
+
+    # slot khali hai to nayi entry bana do
+    while len(prompts) <= data.index:
+        prompts.append({"key": "", "answer": ""})
+
+    prompts[data.index]["key"] = data.key
+
+    updated = await db.profile.update(
+        where={"userId": data.userId},
+        data={"prompts": Json(prompts)}
+    )
+
+    return {"message": "Prompt key updated", "prompts": updated.prompts}
+
+
+@router.post("/profile/prompt/answer")
+async def update_prompt_answer(data: UpdatePromptAnswerRequest):
+    profile = await db.profile.find_unique(where={"userId": data.userId})
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    prompts = profile.prompts or []
+
+    while len(prompts) <= data.index:
+        prompts.append({"key": "", "answer": ""})
+
+    prompts[data.index]["answer"] = data.answer
+
+    updated = await db.profile.update(
+        where={"userId": data.userId},
+        data={"prompts": Json(prompts)}
+    )
+
+    return {"message": "Prompt answer updated", "prompts": updated.prompts}
  
+
