@@ -27,7 +27,9 @@ async def fetch_likes_received(
 
     # 1. Validate user exists
     try:
-        user = await db.user.find_unique(where={"id": user_id})
+        user = await db.user.find_unique(
+            where={"id": user_id}
+        )
     except PrismaError as e:
         raise HTTPException(
             status_code=500,
@@ -40,7 +42,7 @@ async def fetch_likes_received(
             detail="User not found"
         )
 
-    # 2. Get users already responded to
+    # 2. Users already responded to
     try:
         already_responded = await db.interaction.find_many(
             where={"fromUserId": user_id}
@@ -68,7 +70,11 @@ async def fetch_likes_received(
             order={"createdAt": "desc"},
             take=limit,
             skip=offset,
-            include={"fromUser": True},
+            include={
+                "fromUser": True,
+                "quote": True,
+                "photo": True,
+            },
         )
     except PrismaError as e:
         raise HTTPException(
@@ -87,13 +93,25 @@ async def fetch_likes_received(
 
         results.append({
             "userId": liker.id,
-            "name": getattr(liker, "name", None),
-            "photos": getattr(liker, "photos", None),
-            "bio": getattr(liker, "bio", None),
+            "name": liker.name,
+            "photos": liker.photos,
+            # "bio": liker.bio,
+
             "interactionType": interaction.type,
             "compliment": interaction.compliment,
+
             "quoteid": interaction.quoteid,
+            "quote": {
+                "id": interaction.quote.id,
+                "text": interaction.quote.text
+            } if interaction.quote else None,
+
             "photoId": interaction.photoId,
+            "photo": {
+                "id": interaction.photo.id,
+                "url": interaction.photo.url
+            } if interaction.photo else None,
+
             "likedAt": interaction.createdAt,
         })
 
@@ -103,7 +121,7 @@ async def fetch_likes_received(
         "offset": offset,
         "likes": results,
     }
-    
+        
 class MessageSendRequest(BaseModel):
     matchId: int
     senderId: int
