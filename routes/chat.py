@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException
+from prisma.errors import PrismaError
 from typing import Optional
 from pydantic import BaseModel
 from db import db
@@ -14,6 +15,95 @@ import os
 # model = whisper.load_model("base")
 router = APIRouter(prefix="/chat", tags=["chat"])
 
+async def fetch_likes_received(
+    user_id: int,
+    limit: int = 20,
+    offset: int = 0,
+):
+    """
+    Returns profiles of users who liked/superliked `user_id`
+    and have not yet received any response from `user_id`.
+    """
+
+    # 1. Validate user exists
+    try:
+        user = await db.user.find_unique(where={"id": user_id})
+    except PrismaError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching user: {str(e)}"
+        )
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found"
+        )
+
+    # 2. Get users already responded to
+    try:
+        already_responded = await db.interaction.find_many(
+            where={"fromUserId": user_id}
+        )
+    except PrismaError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching existing interactions: {str(e)}"
+        )
+
+    responded_ids = [row.toUserId for row in already_responded]
+
+    # 3. Fetch pending likes
+    try:
+        pending_likes = await db.interaction.find_many(
+            where={
+                "toUserId": user_id,
+                "type": {
+                    "in": ["LIKE", "SUPERLIKE"]
+                },
+                "fromUserId": {
+                    "notIn": responded_ids
+                } if responded_ids else {},
+            },
+            order={"createdAt": "desc"},
+            take=limit,
+            skip=offset,
+            include={"fromUser": True},
+        )
+    except PrismaError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching pending likes: {str(e)}"
+        )
+
+    # 4. Build response
+    results = []
+
+    for interaction in pending_likes:
+        liker = interaction.fromUser
+
+        if not liker:
+            continue
+
+        results.append({
+            "userId": liker.id,
+            "name": getattr(liker, "name", None),
+            "photos": getattr(liker, "photos", None),
+            "bio": getattr(liker, "bio", None),
+            "interactionType": interaction.type,
+            "compliment": interaction.compliment,
+            "quoteid": interaction.quoteid,
+            "photoId": interaction.photoId,
+            "likedAt": interaction.createdAt,
+        })
+
+    return {
+        "count": len(results),
+        "limit": limit,
+        "offset": offset,
+        "likes": results,
+    }
+    
 class MessageSendRequest(BaseModel):
     matchId: int
     senderId: int
@@ -112,56 +202,68 @@ async def get_conversations(user_id: int):
     # Sorting according to recent messages
     result.sort(key=lambda x: x["updatedAt"], reverse=True)
     
+    # Fetch pending likes
+    likes_received = await fetch_likes_received(
+        user_id=user_id,
+        limit=20,
+        offset=0,
+    )
+    
     # 5. Exact same JSON format return hoga
-    return {"conversations": result}
+    return {"conversations": result, "likesReceived": likes_received}
 
 
 @router.get("/messages/{match_id}")
-async def get_messages(match_id: int, my_id: int, skip: int = 0, take: int = 50):
-    
-    # 1. Fetch only the conversation ID (Lightweight query)
+async def get_messages(
+    match_id: int,
+    my_id: int,
+    skip: int = 0,
+    take: int = 50,
+):
+    # Fetch match with conversation
     match = await db.match.find_unique(
         where={"id": match_id},
-        include={"conversation": True}
+        include={"conversation": True},
     )
-    
+
     if not match:
         raise HTTPException(status_code=404, detail="Match not found")
-    
+
     if not match.conversation:
-        return {"status": 200, "messages": []}
+        return {
+            "messages": [],
+            "likesReceived": await fetch_likes_received(my_id)
+        }
 
     conversation_id = match.conversation.id
 
-    # 2. FIX: Fetch messages FIRST, don't make the user wait for the update
+    # Fetch messages
     messages = await db.message.find_many(
         where={"conversationId": conversation_id},
         order={"createdAt": "desc"},
         skip=skip,
         take=take,
-        include={"sender": True}
+        include={"sender": True},
     )
 
-
+    # Mark messages as read in background
     async def mark_as_read_background():
         try:
             await db.message.update_many(
                 where={
                     "conversationId": conversation_id,
                     "senderId": {"not": my_id},
-                    "isRead": False
+                    "isRead": False,
                 },
-                data={"isRead": True}
+                data={"isRead": True},
             )
-        except Exception as e:
-            # Log the error here if needed, but don't crash the user's request
+        except Exception:
             pass
 
     asyncio.create_task(mark_as_read_background())
-    
-    # 4. Return the messages instantly
-    return {"messages": messages[::-1]}
 
+    return {"messages": messages[::-1]}
+    
 @router.post("/messages/send")
 async def send_message(data: MessageSendRequest):
     # 1. Get or Create Conversation for this Match
