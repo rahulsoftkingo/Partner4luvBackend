@@ -13,7 +13,7 @@ import os
 
 
 # model = whisper.load_model("base")
-router = APIRouter(prefix="/chat", tags=["chat"])
+router = APIRouter(prefix="/chat", tags=["chats"])
 
 async def fetch_likes_received(
     user_id: int,
@@ -134,7 +134,7 @@ async def startup():
         await db.connect()
 
 @router.get("/conversations/{user_id}")
-async def get_conversations(user_id: int):
+async def get_detail_conversation_of_all_user(user_id: int):
     # 1. Matches fetch karo sahi 'order_by' syntax ke saath
     matches = await db.match.find_many(
         where={

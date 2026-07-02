@@ -11,7 +11,7 @@ from prisma.errors import ForeignKeyViolationError, UniqueViolationError, Prisma
 
 from db import db
 
-router = APIRouter(prefix="/social", tags=["social"])
+router = APIRouter(prefix="/social", tags=["Social"])
 
 class InteractionRequest(BaseModel):
     fromUserId: int
@@ -25,8 +25,6 @@ class InteractionRequest(BaseModel):
 async def startup():
     if not db.is_connected():
         await db.connect()
-
-
 
 
 @router.post("/interact")
@@ -193,20 +191,59 @@ async def interact(data: InteractionRequest):
         except PrismaError as e:
             raise HTTPException(status_code=500, detail=f"Error creating match: {str(e)}")
 
+        # 5. Agar kisi bhi interaction ke sath compliment tha,
+        # use conversation ke message ke roop mein save karo
+        try:
+            conversation = await db.conversation.find_unique(
+                where={"matchId": match.id}
+            )
+
+            if not conversation:
+                conversation = await db.conversation.create(
+                    data={"matchId": match.id}
+                )
+
+            # Chronological order maintain karne ke liye:
+            # jisne pehle interact kiya (reverse_interaction), uska compliment pehle jaayega
+            compliments_to_save = []
+
+            if reverse_interaction.compliment:
+                compliments_to_save.append(
+                    (reverse_interaction.fromUserId, reverse_interaction.compliment)
+                )
+
+            if interaction.compliment:
+                compliments_to_save.append(
+                    (interaction.fromUserId, interaction.compliment)
+                )
+
+            for sender_id, compliment_text in compliments_to_save:
+                await db.message.create(
+                    data={
+                        "conversationId": conversation.id,
+                        "senderId": sender_id,
+                        "content": compliment_text,
+                        "type": "TEXT"
+                    }
+                )
+
+            if compliments_to_save:
+                await db.conversation.update(
+                    where={"id": conversation.id},
+                    data={"updatedAt": datetime.now(timezone.utc)}
+                )
+
+        except PrismaError as e:
+            # Match already ho chuka hai, isliye compliment-save fail hone se
+            # match response fail nahi karna chahiye - sirf log karo
+            print(f"Error saving compliment as message: {str(e)}")
+
         return {
             "message": "Interaction saved",
             "isMatch": True,
             "reason": "Both users liked each other",
             "matchId": match.id
         }
-
-    # Fallback
-    return {
-        "message": "Interaction saved",
-        "isMatch": False,
-        "reason": "Match conditions not satisfied",
-        "complimentFromUser1toUser2": data.compliment
-    }
     
 @router.get("/interests/{user_id}")
 async def get_user_matches(user_id: int):
