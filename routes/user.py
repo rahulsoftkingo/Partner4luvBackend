@@ -1171,5 +1171,35 @@ async def update_prompt_answer(data: UpdatePromptAnswerRequest):
     )
 
     return {"message": "Prompt answer updated", "prompts": updated.prompts}
+
+
+@router.get("/profile/prompt/answer/{user_id}")
+async def get_prompt_answers(user_id: int):
+    try:
+        profile = await db.profile.find_unique(
+            where={"userId": user_id}
+        )
+
+        if not profile:
+            raise HTTPException(
+                status_code=404,
+                detail="Profile not found"
+            )
+
+        return {
+            "message": "Prompt answers fetched successfully",
+            "prompts": profile.prompts or []
+        }
+
+    except HTTPException as e:
+        raise e
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal Server Error: {str(e)}"
+        )
+
+
  
 
