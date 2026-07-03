@@ -232,12 +232,7 @@ async def get_detail_conversation_of_all_user(user_id: int):
 
 
 @router.get("/messages/{match_id}")
-async def get_messages(
-    match_id: int,
-    my_id: int,
-    skip: int = 0,
-    take: int = 50,
-):
+async def get_messages(match_id: int,my_id: int,skip: int = 0,take: int = 50):
     # Fetch match with conversation
     match = await db.match.find_unique(
         where={"id": match_id},

@@ -14,6 +14,7 @@ from db import db
 from prisma import Json
 from utils.token import create_refresh_token
 
+
 router = APIRouter(prefix="/user", tags=["mobile"])
 
 # --- Pydantic Schemas ---
@@ -164,7 +165,7 @@ class UserTextResponsesRequest(BaseModel):
 
 class UpdatePromptKeyRequest(BaseModel):
     userId: int
-    index: int          # 0, 1, 2 -> teen slots
+    index: Literal[0, 1, 2]
     key: str
 
 class UpdatePromptAnswerRequest(BaseModel):
