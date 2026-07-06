@@ -20,6 +20,10 @@ class InteractionRequest(BaseModel):
     type: str # LIKE, SUPERLIKE, DISLIKE
     quoteid: Optional[int] = None
     photoid: Optional[int] = None
+    
+class UninteractRequest(BaseModel):
+    fromUserId: int
+    toUserId: int
 
 @router.on_event("startup")
 async def startup():
@@ -576,7 +580,65 @@ async def generate_agora_token(data: AgoraTokenRequest):
         "expiresAt": privilege_expired_ts,
         "role": "PUBLISHER"
     }
+
+
+
+@router.post("/uninteract")
+async def uninteract(data: UninteractRequest):
+    if data.fromUserId == data.toUserId:
+        raise HTTPException(status_code=400, detail="Cannot un-interact with yourself")
+
+    try:
+        interactions = await db.interaction.find_many(
+            where={
+                "OR": [
+                    {"fromUserId": data.fromUserId, "toUserId": data.toUserId},
+                    {"fromUserId": data.toUserId, "toUserId": data.fromUserId},
+                ]
+            }
+        )
+    except PrismaError as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching interactions: {str(e)}")
+
+    if not interactions:
+        raise HTTPException(status_code=404, detail="No interaction found between these users")
     
+    try:
+        await db.interaction.delete_many(
+            where={
+                "OR": [
+                    {"fromUserId": data.fromUserId, "toUserId": data.toUserId},
+                    {"fromUserId": data.toUserId, "toUserId": data.fromUserId},
+                ]
+            }
+        )
+    except PrismaError as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting interactions: {str(e)}")
+
+    match = await db.match.find_first(
+        where={
+            "user1Id": min(data.fromUserId, data.toUserId),
+            "user2Id": max(data.fromUserId, data.toUserId),
+        }
+    )
+
+    match_unmatched = False
+    if match:
+        try:
+            await db.match.update(
+                where={"id": match.id},
+                data={"status": "UNMATCHED"}
+            )
+            match_unmatched = True
+        except PrismaError as e:
+            raise HTTPException(status_code=500, detail=f"Error updating match status: {str(e)}")
+
+    return {
+        "status": "ok",
+        "interactionsRemoved": len(interactions),
+        "matchUnmatched": match_unmatched,
+        "messagesPreserved": True
+    }
     
 # @router.post("/token/subscribe")
 
