@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from prisma import Prisma
 import uvicorn
-from routes import admin, user, economy, social, chat, ai, notifications
+from routes import admin, user, economy, social, chat, ai, notifications,payment
 
 from db import db
 
@@ -53,6 +53,7 @@ async def shutdown():
     await db.disconnect()
 
 # Include Routers
+app.include_router(payment.router, prefix="/api")
 app.include_router(ai.router, prefix="/api")
 app.include_router(admin.router, prefix="/auth")
 app.include_router(user.router, prefix="/auth")

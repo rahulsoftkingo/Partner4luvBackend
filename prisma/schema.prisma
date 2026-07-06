@@ -1,6 +1,6 @@
 generator client {
   provider             = "prisma-client-py"
-  output               = "../venv/lib/python3.12/site-packages/prisma"
+  output               = "../venv/Lib/site-packages/prisma"
   recursive_type_depth = 5
 }
 datasource db {
@@ -52,6 +52,8 @@ model User {
   fcmToken             String?              
   isBlock              Boolean?             
   allowedNotificationTypes    NotificationType[]   @default([MESSAGES,CRUSHES,SUPERLIKE,LIKE])
+  subscriptionExpiresAt DateTime?
+  superLikeBalance      Int      @default(0)
   @@unique([socialProvider, socialId])
 }
 
@@ -283,17 +285,17 @@ model UserResponse {
   @@unique([userId, questionId, optionId], map: "unique_user_question_option")
 }
 
-model Payment {
-  id        Int           @id @default(autoincrement())
-  txId      String        @unique
-  amount    Float
-  netAmount Float
-  method    String
-  status    PaymentStatus @default(PENDING)
-  tier      String
-  createdAt DateTime      @default(now())
-  userId    Int
-  user      User          @relation(fields: [userId], references: [id])
+ model Payment {
+      id                     Int      @id @default(autoincrement())
+      userId                 Int
+      user                   User     @relation(fields: [userId], references: [id])
+      provider               String   // "GOOGLE_PLAY"
+      providerTransactionId  String   @unique   // purchaseToken
+      productId              String
+      status                 String   // COMPLETED, REFUNDED, CANCELED, EXPIRED
+      rawResponse            Json?
+      createdAt              DateTime @default(now())
+      updatedAt              DateTime @updatedAt
 }
 
 model SubscriptionPlan {

@@ -384,9 +384,7 @@ async def handle_rtdn(request: Request):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Google Play billing is not configured: {_init_error}",
         )
-
-    # Re-fetch current state from Google rather than trusting the
-    # notification payload alone, since it's just a "something changed" ping.
+        
     result = _verify_subscription(product_id, purchase_token)
 
     try:
@@ -411,7 +409,6 @@ async def handle_rtdn(request: Request):
             data={"status": new_status, "rawResponse": Json(result)},
         )
     except PrismaError as e:
-        # Entitlement already applied above; just log the bookkeeping failure.
         print(f"WARNING: failed to update payment record {payment.id}: {e}")
 
     return {"status": "ok"}
