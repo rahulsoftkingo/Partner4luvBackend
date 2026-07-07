@@ -547,9 +547,8 @@ import shutil
 from uuid import uuid4
 from db import db
 from prisma import Json
-
 from datetime import datetime, timezone
-
+from prisma.errors import PrismaError
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
@@ -1121,38 +1120,54 @@ class SendGiftRequest(BaseModel):
 
 @router.post("/send-gift")
 async def send_gift(data: SendGiftRequest):
-    sender = await db.user.find_unique(where={"id": data.sender_id})
-    item = await db.virtualitem.find_unique(where={"id": data.item_id})
+    try:
+        sender = await db.user.find_unique(where={"id": data.sender_id})
+        item = await db.virtualitem.find_unique(where={"id": data.item_id})
 
-    if not sender or not item:
-        raise HTTPException(status_code=404, detail="User or Item not found")
+        if not sender or not item:
+            raise HTTPException(status_code=404, detail="User or Item not found")
 
-    if sender.coins < item.price:
-        raise HTTPException(status_code=400, detail="Insufficient coins")
+        if sender.coins < item.price:
+            raise HTTPException(status_code=400, detail="Insufficient coins")
 
-    await db.user.update(
-        where={"id": sender.id},
-        data={"coins": {"decrement": item.price}}
-    )
+        await db.user.update(
+            where={"id": sender.id},
+            data={"coins": {"decrement": item.price}}
+        )
 
-    await db.cointransaction.create(
-        data={
-            "userId": sender.id,
-            "amount": -item.price,
-            "type": "GIFT_SENT",
-            "description": f"Sent {item.name} to user ID {data.receiver_id}"
+        await db.cointransaction.create(
+            data={
+                "userId": sender.id,
+                "amount": -item.price,
+                "type": "GIFT_SENT",
+                "description": f"Sent {item.name} to user ID {data.receiver_id}"
+            }
+        )
+
+        sent_gift = await db.sentgift.create(
+            data={
+                "senderId": data.sender_id,
+                "receiverId": data.receiver_id,
+                "itemId": data.item_id,
+                "coinPrice": item.price
+            }
+        )
+
+        return {
+            "message": "Gift sent successfully",
+            "sent_gift_id": sent_gift.id
         }
-    )
 
-    sent_gift = await db.sentgift.create(
-        data={
-            "senderId": data.sender_id,
-            "receiverId": data.receiver_id,
-            "itemId": data.item_id
-        }
-    )
+    except HTTPException as e:
+        raise e
 
-    return {"message": "Gift sent successfully", "sent_gift_id": sent_gift.id}
+    except PrismaError as e:
+        print("Prisma Error:", str(e))
+        raise HTTPException(status_code=500, detail=f"Database Error: {str(e)}")
+
+    except Exception as e:
+        print("Unexpected Error:", str(e))
+        raise HTTPException(status_code=500, detail=f"Unexpected Error: {str(e)}")
 
 
 # ---------------------------------------------------------------------------
