@@ -686,8 +686,13 @@ async def get_matches(user_id: int):
 @router.get("/onboarding/questions")
 async def get_onboarding_questions():
     categories = await db.questionnairecategory.find_many(
-        include={"questions": {"include": {"options": True}}},
-        order={"order": "asc"}
+        include={
+            "questions": {
+                "where": {"type": "text"},
+                "include": {"options": True},
+            }
+        },
+        order={"order": "asc"},
     )
     return {"categories": categories}
 
