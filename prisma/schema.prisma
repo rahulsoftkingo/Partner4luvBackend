@@ -442,14 +442,14 @@ model VirtualItem {
 }
 
 model CoinPackage {
-  id            Int      @id @default(autoincrement())
-  name          String
-  coins         Int
-  price         Float
-  currency      String   @default("USD")
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  stripePriceId String?  @unique
+  id              Int      @id @default(autoincrement())
+  name            String
+  coins           Int
+  price           Float
+  currency        String   @default("USD")
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  googleProductId String?  @unique
 }
 
 model CoinTransaction {
