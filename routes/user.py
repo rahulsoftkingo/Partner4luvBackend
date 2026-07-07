@@ -1221,7 +1221,7 @@ async def save_text_answer(data: TextAnswerRequest):
     question = await db.question.find_unique(where={"id": data.questionId})
     if not question:
         raise HTTPException(status_code=404, detail="Question not found")
-    if question.type != "TEXT":
+    if question.type != "text":
         raise HTTPException(status_code=400, detail="This question is not a text-type question")
 
     try:
@@ -1252,27 +1252,36 @@ async def save_text_answer(data: TextAnswerRequest):
     }
     
 
-@router.get("/onboarding/text-answer/{user_id}/{question_id}")
-async def get_single_text_answer(user_id: int, question_id: int):
+@router.get("/onboarding/text-answer/{user_id}")
+async def get_text_answers(user_id: int):
     try:
-        answer = await db.textquestionanswer.find_unique(
+        answers = await db.textquestionanswer.find_many(
             where={
-                "userId_questionId": {
-                    "userId": user_id,
-                    "questionId": question_id
+                "userId": user_id,
+                "question": {
+                    "type": "text"
                 }
             },
-            include={"question": True}
+            include={
+                "question": True
+            }
         )
-    except PrismaError as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching text answer: {str(e)}")
 
-    if not answer:
-        raise HTTPException(status_code=404, detail="Text answer not found")
+    except PrismaError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching text answers: {str(e)}"
+        )
+
+    if not answers:
+        raise HTTPException(
+            status_code=404,
+            detail="No text answers found"
+        )
 
     return {
-        "message": "Text answer fetched successfully",
-        "data": answer
+        "message": "Text answers fetched successfully",
+        "data": answers
     }
     
 @router.get("/onboarding/questions/text")
