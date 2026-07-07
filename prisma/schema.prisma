@@ -1,6 +1,6 @@
 generator client {
   provider             = "prisma-client-py"
-  output               = "../venv/lib/python3.12/site-packages/prisma"
+  output               =  "../venv/lib/python3.12/site-packages/prisma"
   recursive_type_depth = 5
 }
 datasource db {
@@ -49,6 +49,7 @@ model User {
   matchSettings        UserMatchSetting?
   responses            UserResponse[]
   quotes               Quote[]
+  textQuestionAnswers  TextQuestionAnswer[]
   fcmToken             String?              
   isBlock              Boolean?             
   allowedNotificationTypes    NotificationType[]   @default([MESSAGES,CRUSHES,SUPERLIKE,LIKE])
@@ -255,10 +256,27 @@ model Question {
   order      Int                   @default(0)
   createdAt  DateTime              @default(now())
   imageUrl   String?
-  selectionLimit  Int?             @default(1)
+  selectionLimit  Int?             @default(1)            
   category   QuestionnaireCategory @relation(fields: [categoryId], references: [id])
   options    QuestionOption[]
   responses  UserResponse[]
+  textAnswers      TextQuestionAnswer[]
+}
+
+
+model TextQuestionAnswer {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  questionId Int
+  answer     String
+  createdAt  DateTime @default(now())
+
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([questionId])
+  @@unique([userId, questionId]) // Ek user ek question ka sirf ek answer de sakta hai
 }
 
 model QuestionOption {

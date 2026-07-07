@@ -172,6 +172,12 @@ class UpdatePromptAnswerRequest(BaseModel):
     userId: int
     index: int
     answer: str
+    
+
+class SingleTextResponseRequest(BaseModel):
+    userId: int
+    questionId: str
+    textResponse: str
 # --- Routes ---
 
 
@@ -1200,6 +1206,95 @@ async def get_prompt_answers(user_id: int):
             status_code=500,
             detail=f"Internal Server Error: {str(e)}"
         )
+
+class TextAnswerRequest(BaseModel):
+    userId: int
+    questionId: int
+    answer: str
+    
+@router.post("/onboarding/text-answer")
+async def save_text_answer(data: TextAnswerRequest):
+    
+    if not data.answer.strip():
+        raise HTTPException(status_code=400, detail="answer cannot be empty")
+    
+    question = await db.question.find_unique(where={"id": data.questionId})
+    if not question:
+        raise HTTPException(status_code=404, detail="Question not found")
+    if question.type != "TEXT":
+        raise HTTPException(status_code=400, detail="This question is not a text-type question")
+
+    try:
+        answer = await db.textquestionanswer.upsert(
+            where={
+                "userId_questionId": {
+                    "userId": data.userId,
+                    "questionId": data.questionId
+                }
+            },
+            data={
+                "create": {
+                    "userId": data.userId,
+                    "questionId": data.questionId,
+                    "answer": data.answer
+                },
+                "update": {
+                    "answer": data.answer
+                }
+            }
+        )
+    except PrismaError as e:
+        raise HTTPException(status_code=500, detail=f"Error saving text answer: {str(e)}")
+
+    return {
+        "message": "Text answer saved successfully",
+        "data": answer
+    }
+    
+
+@router.get("/onboarding/text-answer/{user_id}/{question_id}")
+async def get_single_text_answer(user_id: int, question_id: int):
+    try:
+        answer = await db.textquestionanswer.find_unique(
+            where={
+                "userId_questionId": {
+                    "userId": user_id,
+                    "questionId": question_id
+                }
+            },
+            include={"question": True}
+        )
+    except PrismaError as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching text answer: {str(e)}")
+
+    if not answer:
+        raise HTTPException(status_code=404, detail="Text answer not found")
+
+    return {
+        "message": "Text answer fetched successfully",
+        "data": answer
+    }
+    
+@router.get("/onboarding/questions/text")
+async def get_text_questions():
+    """
+    Returns all questions where type = text (text-input questions only),
+    grouped with their category info.
+    """
+    try:
+        questions = await db.question.find_many(
+            where={"type": "text"},
+            include={"category": True},
+            order={"order": "asc"}
+        )
+    except PrismaError as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching text questions: {str(e)}")
+
+    return {
+        "message": "Text questions fetched successfully",
+        "questions": questions
+    }
+
 
 
  
