@@ -688,8 +688,14 @@ async def get_onboarding_questions():
     categories = await db.questionnairecategory.find_many(
         include={
             "questions": {
-                "where": {"type": "text"},
-                "include": {"options": True},
+                "where": {
+                    "type": {
+                        "not": "text"
+                    }
+                },
+                "include": {
+                    "options": True
+                }
             }
         },
         order={"order": "asc"},
