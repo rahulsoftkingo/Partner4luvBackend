@@ -24,6 +24,19 @@ class InteractionRequest(BaseModel):
 class UninteractRequest(BaseModel):
     fromUserId: int
     toUserId: int
+    
+class ChatThemeRequest(BaseModel):
+    fromUserId: int
+    matchId: int
+    theme: str  
+    
+THEME_IMAGE_MAP = {
+    "BLUE": "/uploads/themes/blue.jpg"
+    "RED" : "/uploads/themes/red.jpg",
+}
+
+ALLOWED_THEMES = set(THEME_IMAGE_MAP.keys())
+
 
 @router.on_event("startup")
 async def startup():
@@ -615,12 +628,10 @@ async def uninteract(data: UninteractRequest):
     except PrismaError as e:
         raise HTTPException(status_code=500, detail=f"Error deleting interactions: {str(e)}")
 
-    match = await db.match.find_first(
-        where={
-            "user1Id": min(data.fromUserId, data.toUserId),
-            "user2Id": max(data.fromUserId, data.toUserId),
-        }
-    )
+    match = await db.match.find_first(where={
+        "user1Id": min(data.fromUserId, data.toUserId),
+        "user2Id": max(data.fromUserId, data.toUserId),
+    })
 
     match_unmatched = False
     if match:
@@ -639,7 +650,131 @@ async def uninteract(data: UninteractRequest):
         "matchUnmatched": match_unmatched,
         "messagesPreserved": True
     }
-    
+
+
+@router.post("/chat-theme")
+async def set_chat_theme(data: ChatThemeRequest):
+
+    theme_normalized = data.theme.strip().upper()
+
+    # Validate that the requested theme actually exists
+    if theme_normalized not in ALLOWED_THEMES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid theme. Allowed values: {', '.join(ALLOWED_THEMES)}"
+        )
+
+    # 1. Validate the match exists
+    try:
+        match = await db.match.find_unique(where={"id": data.matchId})
+    except PrismaError as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching match: {str(e)}")
+
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    # Make sure the requesting user is actually part of this match
+    if data.fromUserId not in (match.user1Id, match.user2Id):
+        raise HTTPException(
+            status_code=403,
+            detail="You are not part of this match"
+        )
+
+    if match.status != "ACTIVE":
+        raise HTTPException(status_code=403, detail="Match is not active")
+
+    # Identify the other user in this match
+    other_user_id = match.user2Id if match.user1Id == data.fromUserId else match.user1Id
+
+    # 2. Save or update this user's chosen theme for this match (upsert)
+    try:
+        my_theme = await db.chattheme.upsert(
+            where={
+                "matchId_userId": {
+                    "matchId": data.matchId,
+                    "userId": data.fromUserId
+                }
+            },
+            data={
+                "create": {
+                    "matchId": data.matchId,
+                    "userId": data.fromUserId,
+                    "theme": theme_normalized
+                },
+                "update": {
+                    "theme": theme_normalized
+                }
+            }
+        )
+    except PrismaError as e:
+        raise HTTPException(status_code=500, detail=f"Error saving chat theme: {str(e)}")
+
+    # 3. Check what theme the other user has selected (if any)
+    try:
+        other_theme = await db.chattheme.find_unique(
+            where={
+                "matchId_userId": {
+                    "matchId": data.matchId,
+                    "userId": other_user_id
+                }
+            }
+        )
+    except PrismaError as e:
+        raise HTTPException(status_code=500, detail=f"Error checking other user's theme: {str(e)}")
+
+    # 4. If both users picked the same theme -> trigger Super Match response
+    if other_theme and other_theme.theme == theme_normalized:
+        return {
+            "message": "Both users chose the same vibe!",
+            "isSuperMatch": True,
+            "theme": theme_normalized,
+            "imageUrl": THEME_IMAGE_MAP[theme_normalized],
+            "matchId": data.matchId
+        }
+
+    # Otherwise, just confirm the theme was saved for this user only
+    return {
+        "message": "Chat theme updated",
+        "isSuperMatch": False,
+        "theme": theme_normalized,
+        "imageUrl": THEME_IMAGE_MAP[theme_normalized],
+        "matchId": data.matchId,
+        "reason": "Waiting to see if the other user picks the same background"
+    }
+
+
+# @router.get("/chat-theme/{match_id}")
+# async def get_chat_theme(match_id: str, userId: int):
+#     try:
+#         match = await db.match.find_unique(where={"id": match_id})
+#     except PrismaError as e:
+#         raise HTTPException(status_code=500, detail=f"Error fetching match: {str(e)}")
+
+#     if not match:
+#         raise HTTPException(status_code=404, detail="Match not found")
+
+#     other_user_id = match.user2Id if match.user1Id == userId else match.user1Id
+
+#     try:
+#         my_theme = await db.chattheme.find_unique(
+#             where={"matchId_userId": {"matchId": match_id, "userId": userId}}
+#         )
+#         other_theme = await db.chattheme.find_unique(
+#             where={"matchId_userId": {"matchId": match_id, "userId": other_user_id}}
+#         )
+#     except PrismaError as e:
+#         raise HTTPException(status_code=500, detail=f"Error fetching themes: {str(e)}")
+
+#     is_super_match = bool(
+#         my_theme and other_theme and my_theme.theme == other_theme.theme
+#     )
+
+#     return {
+#         "matchId": match_id,
+#         "myTheme": my_theme.theme if my_theme else None,
+#         "otherUserTheme": other_theme.theme if other_theme else None,
+#         "isSuperMatch": is_super_match
+#     }  
 # @router.post("/token/subscribe")
 
 # @router.get("/recommendations/{user_id}")

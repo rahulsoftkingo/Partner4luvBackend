@@ -49,6 +49,7 @@ model User {
   matchSettings        UserMatchSetting?
   responses            UserResponse[]
   quotes               Quote[]
+  chatThemes           ChatTheme[]
   textQuestionAnswers  TextQuestionAnswer[]
   fcmToken             String?              
   isBlock              Boolean?             
@@ -163,6 +164,7 @@ model Match {
   conversation Conversation?
   user1        User          @relation("User1Matches", fields: [user1Id], references: [id])
   user2        User          @relation("User2Matches", fields: [user2Id], references: [id])
+  chatThemes ChatTheme[]
 
   @@unique([user1Id, user2Id])
 }
@@ -585,4 +587,18 @@ enum TransactionType {
   GIFT_SENT
   GIFT_RECEIVED
   ADMIN_ADJUSTMENT
+}
+
+model ChatTheme {
+  id        Int      @id @default(autoincrement())
+  matchId   Int
+  userId    Int
+  theme     String   // e.g. "SUNSET", "OCEAN", "MIDNIGHT", "ROSE" etc.
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  match Match @relation(fields: [matchId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@unique([matchId, userId]) 
 }
