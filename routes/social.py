@@ -743,6 +743,16 @@ async def set_chat_theme(data: ChatThemeRequest):
         "reason": "Waiting to see if the other user picks the same background"
     }
 
+@router.get("/chat-theme/options/list")
+async def get_available_themes():
+    themes = [
+        {"theme": theme_name, "imageUrl": image_url}
+        for theme_name, image_url in THEME_IMAGE_MAP.items()
+    ]
+
+    return {
+        "themes": themes
+    }
 
 @router.get("/chat-theme/{match_id}")
 async def get_chat_theme(match_id: str, userId: int):
