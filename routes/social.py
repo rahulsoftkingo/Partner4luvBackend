@@ -754,18 +754,16 @@ async def get_available_themes():
         "themes": themes
     }
 
-@router.get("/chat-theme/{match_id}")
+
+@router.get("/chattheme/{match_id}")
 async def get_chat_theme(match_id: str, userId: int):
     try:
         match = await db.match.find_unique(where={"id": match_id})
     except PrismaError as e:
         raise HTTPException(status_code=500, detail=f"Error fetching match: {str(e)}")
-
     if not match:
         raise HTTPException(status_code=404, detail="Match not found")
-
     other_user_id = match.user2Id if match.user1Id == userId else match.user1Id
-
     try:
         my_theme = await db.chattheme.find_unique(
             where={"matchId_userId": {"matchId": match_id, "userId": userId}}
@@ -775,11 +773,9 @@ async def get_chat_theme(match_id: str, userId: int):
         )
     except PrismaError as e:
         raise HTTPException(status_code=500, detail=f"Error fetching themes: {str(e)}")
-
     is_super_match = bool(
         my_theme and other_theme and my_theme.theme == other_theme.theme
     )
-
     return {
         "matchId": match_id,
         "myTheme": my_theme.theme if my_theme else None,

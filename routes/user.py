@@ -905,9 +905,9 @@ Toggle a user's block status.
 - **user_id**: The ID of the user to block/unblock
 - **block_status**: True to block, False to unblock
 """  
-@router.post("/block/{user_id}")  # <-- Method POST ho gaya aur shuru mein '/' laga diya
-async def toggle_user_block(user_id: int, data: BlockUserRequest):  # <-- data parameter add kiya
-    # 1. Check if the user exists
+@router.post("/block/{user_id}")  
+async def toggle_user_block(user_id: int, data: BlockUserRequest):   
+
     user = await db.user.find_unique(where={"id": user_id})
     if not user:
         raise HTTPException(
@@ -915,15 +915,15 @@ async def toggle_user_block(user_id: int, data: BlockUserRequest):  # <-- data p
             detail="User not found"
         )
     
-    # 2. Update the isBlock field using JSON body data
     await db.user.update(
         where={"id": user_id},
-        data={"isBlock": data.block_status}  # <-- data.block_status se value ayegi
+        data={"isBlock": data.block_status}  
     )
     
-    # 3. Dynamic success message
     action = "blocked" if data.block_status else "unblocked"
     return {"message": f"User has been successfully {action}."}
+
+
 
 
 

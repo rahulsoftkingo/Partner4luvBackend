@@ -339,22 +339,18 @@ async def clear_chat(user_id: int):
 
 
 
-# @router.post("/upload/audio")
-# async def upload_audio(file: UploadFile):
-#     contents = await file.read()
+@router.post("/upload/audio")
+async def upload_audio(file: UploadFile):
+    contents = await file.read()
 
-#     filename = f"{uuid.uuid4()}.mp3"
-#     file_path = f"uploads/audio/{filename}"
+    filename = f"{uuid.uuid4()}.mp3"
+    file_path = f"uploads/audio/{filename}"
 
-#     os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
-#     with open(file_path, "wb") as f:
-#         f.write(contents)
+    with open(file_path, "wb") as f:
+        f.write(contents)
 
-#     # Audio to Text
-#     # result = model.transcribe(file_path)
-
-#     return {
-#         "audio_url": f"/uploads/audio/{filename}",
-#         "text": result["text"]
-#     }
+    return {
+        "audio_url": f"/uploads/audio/{filename}",
+    }
