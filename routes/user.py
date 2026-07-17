@@ -900,11 +900,7 @@ async def get_user_photos(user_id: int):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-"""
-Toggle a user's block status.
-- **user_id**: The ID of the user to block/unblock
-- **block_status**: True to block, False to unblock
-"""  
+
 @router.post("/block/{user_id}")  
 async def toggle_user_block(user_id: int, data: BlockUserRequest):   
 
@@ -924,6 +920,43 @@ async def toggle_user_block(user_id: int, data: BlockUserRequest):
     return {"message": f"User has been successfully {action}."}
 
 
+@router.get("/matches/{user_id}/blocked")
+async def get_blocked_matches(user_id: int):
+    """
+    Returns matches of `user_id` where the OTHER user in the match
+    has isBlock = True.
+    """
+    matches = await db.match.find_many(
+        where={
+            "OR": [
+                {"user1Id": user_id},
+                {"user2Id": user_id}
+            ],
+            "status": "ACTIVE"
+        },
+        include={
+            "user1": {"include": {"photos": True}},
+            "user2": {"include": {"photos": True}}
+        }
+    )
+    
+    result = []
+    for m in matches:
+        other_user = m.user2 if m.user1Id == user_id else m.user1
+
+        if other_user and getattr(other_user, "isBlock", False):
+            result.append({
+                "matchId": m.id,
+                "user": other_user.id,
+                "name": other_user.name,
+                "photos":other_user.photos,
+                "matchedAt": m.createdAt
+            })
+
+    return {
+        "count": len(result),
+        "blockedMatches": result
+    }
 
 
 
