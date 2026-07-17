@@ -402,25 +402,110 @@ async def delete_messages_by_match(matchId: str):
 #         "deleted_count": deleted_meta
 #     }
 
-@router.get("/recommendations/{user_id}")
-async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):
+# @router.get("/recommendations/{user_id}")
+# async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):
     
-    # 1. FIX: 'select' hata kar 'include' lagaya taaki TypeError na aaye
+#     # 1. FIX: 'select' hata kar 'include' lagaya taaki TypeError na aaye
+#     user = await db.user.find_unique(
+#         where={"id": user_id},
+#         include={"profile": True}
+#     )
+    
+#     if not user or not user.profile:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND, 
+#             detail="User profile not completed"
+#         )
+
+#     # Prisma Python Client ke hisab se dot (.) notation use karenge
+#     profile = user.profile
+#     my_gender = getattr(profile, "gender", None)
+#     interested_in = getattr(profile, "interestedIn", None)
+
+#     # 2. Opposite Gender Logic
+#     if not interested_in or len(interested_in) == 0:
+#         if my_gender == "MALE":
+#             interested_in = ["FEMALE"]
+#         elif my_gender == "FEMALE":
+#             interested_in = ["MALE"]
+#         else:
+#             interested_in = []
+
+#     # Gender filter structure setup
+#     gender_filter = {}
+#     if interested_in:
+#         gender_filter = {"gender": {"in": interested_in}}
+
+#     # 3. Interacted users ki list fetch karo
+#     interacted = await db.interaction.find_many(
+#         where={"fromUserId": user_id}
+#     )
+    
+#     interacted_ids = {i.toUserId for i in interacted if hasattr(i, 'toUserId')}
+#     interacted_ids.add(user_id) 
+#     interacted_list = list(interacted_ids)
+
+#     # 4. Main Query Condition (Relation filtering without "is" keyword)
+#     where_condition = {
+#         "id": {"not_in": interacted_list},
+#         "status": "ACTIVE"
+#     }
+    
+#     if gender_filter:
+#         where_condition["profile"] = gender_filter
+
+#     # 5. Parallel Execution (Fast performance ke liye)
+#     count_task = db.user.count(where=where_condition)
+#     candidates_task = db.user.find_many(
+#         where=where_condition,
+#         include={
+#             "profile": True,
+#             "photos": {"take": 5},
+#         },
+#         skip=skip,
+#         take=take
+#     )
+
+#     total_count, candidates = await asyncio.gather(count_task, candidates_task)
+
+#     # 6. JSON output structure formatting
+#     final_list = [{"user": cand} for cand in candidates]
+
+#     return {
+#         "recommendations": final_list,
+#         "total": total_count
+#     }
+
+
+@router.get("/recommendations/{user_id}")
+async def get_recommendations(
+    user_id: int,
+    skip: int = 0,
+    take: int = 20,
+    min_age: int | None = None,
+    max_age: int | None = None,
+    min_height: float | None = None,
+    max_height: float | None = None,
+    max_distance_km: float | None = None,
+):
+
+    # 1. fetch our user profile
     user = await db.user.find_unique(
         where={"id": user_id},
         include={"profile": True}
     )
-    
+
     if not user or not user.profile:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="User profile not completed"
         )
 
-    # Prisma Python Client ke hisab se dot (.) notation use karenge
     profile = user.profile
     my_gender = getattr(profile, "gender", None)
     interested_in = getattr(profile, "interestedIn", None)
+    my_lat = getattr(profile, "latitude", None)
+    my_lng = getattr(profile, "longitude", None)
 
     # 2. Opposite Gender Logic
     if not interested_in or len(interested_in) == 0:
@@ -431,30 +516,150 @@ async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):
         else:
             interested_in = []
 
-    # Gender filter structure setup
-    gender_filter = {}
-    if interested_in:
-        gender_filter = {"gender": {"in": interested_in}}
-
-    # 3. Interacted users ki list fetch karo
+    # 3. Interacted users ki list
     interacted = await db.interaction.find_many(
         where={"fromUserId": user_id}
     )
-    
     interacted_ids = {i.toUserId for i in interacted if hasattr(i, 'toUserId')}
-    interacted_ids.add(user_id) 
+    interacted_ids.add(user_id)
     interacted_list = list(interacted_ids)
 
-    # 4. Main Query Condition (Relation filtering without "is" keyword)
+    # ============================================================
+    # PATH A: Distance filter chahiye -> raw SQL (Haversine)
+    # ============================================================
+    if max_distance_km is not None and my_lat is not None and my_lng is not None:
+
+        excluded = interacted_list or [0]
+        excluded_sql = ",".join(str(i) for i in excluded)
+
+        conditions = [f'u.id NOT IN ({excluded_sql})', 'u.status = \'ACTIVE\'']
+        params = [my_lat, my_lng]  # $1 = my_lat, $2 = my_lng
+        idx = 3
+
+        gender_clause = ""
+        if interested_in:
+            gender_clause = f'AND p."gender" = ANY(${idx}::"Gender"[])'
+            params.append(interested_in)
+            idx += 1
+
+        height_clause = ""
+        if min_height is not None:
+            height_clause += f' AND p."height" >= ${idx}'
+            params.append(min_height)
+            idx += 1
+        if max_height is not None:
+            height_clause += f' AND p."height" <= ${idx}'
+            params.append(max_height)
+            idx += 1
+
+        age_clause = ""
+        today = date.today()
+        if max_age is not None:
+            oldest_dob = today - timedelta(days=(max_age + 1) * 365.25)
+            age_clause += f' AND p."dateOfBirth" >= ${idx}'
+            params.append(oldest_dob)
+            idx += 1
+        if min_age is not None:
+            youngest_dob = today - timedelta(days=min_age * 365.25)
+            age_clause += f' AND p."dateOfBirth" <= ${idx}'
+            params.append(youngest_dob)
+            idx += 1
+
+        distance_param_idx = idx
+        params.append(max_distance_km)
+
+        base_query = f"""
+            FROM "User" u
+            JOIN "Profile" p ON p."userId" = u.id
+            WHERE u.id NOT IN ({excluded_sql})
+              AND u.status = 'ACTIVE'
+              {gender_clause}
+              {height_clause}
+              {age_clause}
+              AND p.latitude IS NOT NULL
+              AND p.longitude IS NOT NULL
+              AND (6371 * acos(
+                    cos(radians($1)) * cos(radians(p.latitude)) *
+                    cos(radians(p.longitude) - radians($2)) +
+                    sin(radians($1)) * sin(radians(p.latitude))
+              )) <= ${distance_param_idx}
+        """
+
+        select_query = f"""
+            SELECT u.id,
+                (6371 * acos(
+                    cos(radians($1)) * cos(radians(p.latitude)) *
+                    cos(radians(p.longitude) - radians($2)) +
+                    sin(radians($1)) * sin(radians(p.latitude))
+                )) AS distance_km
+            {base_query}
+            ORDER BY distance_km ASC
+            OFFSET {skip} LIMIT {take}
+        """
+
+        count_query = f"SELECT COUNT(*) AS count {base_query}"
+
+        raw_results = await db.query_raw(select_query, *params)
+        count_result = await db.query_raw(count_query, *params)
+
+        total_count = count_result[0]["count"] if count_result else 0
+        result_ids = [r["id"] for r in raw_results]
+        distance_map = {r["id"]: r["distance_km"] for r in raw_results}
+
+        if not result_ids:
+            return {"recommendations": [], "total": total_count}
+
+        candidates = await db.user.find_many(
+            where={"id": {"in": result_ids}},
+            include={"profile": True, "photos": {"take": 5}}
+        )
+        candidates.sort(key=lambda c: result_ids.index(c.id))
+
+        final_list = [
+            {
+                "user": {
+                    **cand.dict(),
+                    "distance_km": round(distance_map[cand.id], 2)
+                }
+            }
+            for cand in candidates
+        ]
+
+        return {"recommendations": final_list, "total": total_count}
+
+    # ============================================================
+    # PATH B: Distance filter nahi chahiye -> normal Prisma query
+    # ============================================================
+    profile_filter = {}
+    if interested_in:
+        profile_filter["gender"] = {"in": interested_in}
+
+    height_condition = {}
+    if min_height is not None:
+        height_condition["gte"] = min_height
+    if max_height is not None:
+        height_condition["lte"] = max_height
+    if height_condition:
+        profile_filter["height"] = height_condition
+
+    if min_age is not None or max_age is not None:
+        today = date.today()
+        dob_condition = {}
+        if max_age is not None:
+            oldest_dob = today - timedelta(days=(max_age + 1) * 365.25)
+            dob_condition["gte"] = oldest_dob
+        if min_age is not None:
+            youngest_dob = today - timedelta(days=min_age * 365.25)
+            dob_condition["lte"] = youngest_dob
+        profile_filter["dateOfBirth"] = dob_condition
+
     where_condition = {
         "id": {"not_in": interacted_list},
         "status": "ACTIVE"
     }
-    
-    if gender_filter:
-        where_condition["profile"] = gender_filter
+    if profile_filter:
+        where_condition["profile"] = profile_filter
 
-    # 5. Parallel Execution (Fast performance ke liye)
     count_task = db.user.count(where=where_condition)
     candidates_task = db.user.find_many(
         where=where_condition,
@@ -468,15 +673,13 @@ async def get_recommendations(user_id: int, skip: int = 0, take: int = 20):
 
     total_count, candidates = await asyncio.gather(count_task, candidates_task)
 
-    # 6. JSON output structure formatting
     final_list = [{"user": cand} for cand in candidates]
 
     return {
         "recommendations": final_list,
         "total": total_count
     }
-
-
+    
 """
 Agora Dynamic RTC Token Generator API
 --------------------------------------

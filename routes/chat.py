@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, status
 from prisma.errors import PrismaError
 from typing import Optional
 from pydantic import BaseModel
@@ -8,6 +8,7 @@ import os
 import uuid
 from fastapi import UploadFile
 import asyncio
+import traceback
 # import whisper
 import os
 
@@ -340,17 +341,61 @@ async def clear_chat(user_id: int):
 
 
 @router.post("/upload/audio")
-async def upload_audio(file: UploadFile):
-    contents = await file.read()
+async def upload_audio(file: UploadFile = File(...)):
+    try:
+        # Check if file is provided
+        if file is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No audio file received."
+            )
 
-    filename = f"{uuid.uuid4()}.mp3"
-    file_path = f"uploads/audio/{filename}"
+        # Check file name
+        if not file.filename:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid file."
+            )
 
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        # Create uploads folder if not exists
+        upload_dir = "uploads/audio"
+        os.makedirs(upload_dir, exist_ok=True)
 
-    with open(file_path, "wb") as f:
-        f.write(contents)
+        # Get extension from original file
+        ext = os.path.splitext(file.filename)[1]
+        if not ext:
+            ext = ".mp3"
 
-    return {
-        "audio_url": f"/uploads/audio/{filename}",
-    }
+        filename = f"{uuid.uuid4()}{ext}"
+        file_path = os.path.join(upload_dir, filename)
+
+        # Read uploaded file
+        contents = await file.read()
+
+        if not contents:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Uploaded audio file is empty."
+            )
+
+        # Save file
+        with open(file_path, "wb") as f:
+            f.write(contents)
+
+        return {
+            "success": True,
+            "message": "Audio uploaded successfully.",
+            "audio_url": f"/uploads/audio/{filename}"
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print("Audio Upload Error:")
+        traceback.print_exc()  # Full error in terminal
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload audio: {str(e)}"
+        )
