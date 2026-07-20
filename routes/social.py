@@ -959,7 +959,7 @@ async def get_available_themes():
 
 
 @router.get("/chattheme/{match_id}")
-async def get_chat_theme(match_id: str, userId: int):
+async def get_chat_theme(match_id: int, userId: int):
     try:
         match = await db.match.find_unique(where={"id": match_id})
     except PrismaError as e:
