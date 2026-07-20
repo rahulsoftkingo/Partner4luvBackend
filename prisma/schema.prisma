@@ -1,6 +1,6 @@
 generator client {
   provider             = "prisma-client-py"
-  output               =  "../venv/lib/python3.12/site-packages/prisma"
+  output               =  "../venv/Lib/site-packages/prisma"
   recursive_type_depth = 5
 }
 datasource db {
@@ -32,6 +32,7 @@ model User {
   blocksGiven          Block[]              @relation("BlocksFrom")
   coinTransactions     CoinTransaction[]
   conversations        ConversationMember[]
+  conversationClears   ConversationClear[]
   interactionsGiven    Interaction[]        @relation("InteractionsFrom")
   interactionsReceived Interaction[]        @relation("InteractionsTo")
   matchesAsUser1       Match[]              @relation("User1Matches")
@@ -57,6 +58,18 @@ model User {
   subscriptionExpiresAt DateTime?
   superLikeBalance      Int      @default(0)
   @@unique([socialProvider, socialId])
+}
+
+model ConversationClear {
+  id             Int          @id @default(autoincrement())
+  conversationId Int
+  userId         Int
+  clearedAt      DateTime     @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  user           User         @relation(fields: [userId], references: [id])
+
+  @@unique([conversationId, userId])
 }
 
 model VerificationCode {
@@ -201,6 +214,7 @@ model Conversation {
   match     Match?               @relation(fields: [matchId], references: [id])
   members   ConversationMember[]
   messages  Message[]
+  clears    ConversationClear[]
 }
 
 model ConversationMember {

@@ -162,6 +162,19 @@ async def get_detail_conversation_of_all_user(user_id: int):
         }
     )
 
+    # 1b. Is user ne kin conversations ko clear kiya hai, sab ek saath fetch karo
+    conversation_ids = [m.conversation.id for m in matches if m.conversation]
+
+    clear_map = {}
+    if conversation_ids:
+        clear_records = await db.conversationclear.find_many(
+            where={
+                "userId": user_id,
+                "conversationId": {"in": conversation_ids}
+            }
+        )
+        clear_map = {c.conversationId: c.clearedAt for c in clear_records}
+
     # 2. Results array aur background parallel tasks setup
     tasks = []
     temp_results = []
@@ -169,27 +182,41 @@ async def get_detail_conversation_of_all_user(user_id: int):
     for m in matches:
         other_user = m.user2 if m.user1Id == user_id else m.user1
         last_message = None
-        
+        conversation_updated_at = m.conversation.updatedAt if m.conversation else m.createdAt
+
+        cleared_at = clear_map.get(m.conversation.id) if m.conversation else None
+
         if m.conversation and m.conversation.messages:
-            last_message = m.conversation.messages[0]
-        
+            candidate = m.conversation.messages[0]
+            # Sirf tab dikhao jab message clearedAt ke baad ka ho
+            if not cleared_at or candidate.createdAt > cleared_at:
+                last_message = candidate
+
+        # Agar chat clear ho chuki hai aur uske baad koi naya message nahi aaya,
+        # to updatedAt bhi clearedAt hi treat karo (list ko neeche push karne ke liye)
+        if cleared_at and (not last_message):
+            conversation_updated_at = cleared_at
+
         temp_results.append({
             "matchId": m.id,
             "otherUser": other_user,
             "lastMessage": last_message,
-            "updatedAt": m.conversation.updatedAt if m.conversation else m.createdAt,
-            "conversation_id": m.conversation.id if m.conversation else None
+            "updatedAt": conversation_updated_at,
+            "conversation_id": m.conversation.id if m.conversation else None,
         })
 
         # Count queries ko parallel chalane ke liye list mein daalo
         if m.conversation:
-            task = db.message.count(
-                where={
-                    "conversationId": m.conversation.id,
-                    "senderId": other_user.id,
-                    "isRead": False
-                }
-            )
+            unread_where = {
+                "conversationId": m.conversation.id,
+                "senderId": other_user.id,
+                "isRead": False
+            }
+            # Cleared se pehle ke unread messages count mat karo
+            if cleared_at:
+                unread_where["createdAt"] = {"gt": cleared_at}
+
+            task = db.message.count(where=unread_where)
             tasks.append(task)
         else:
             tasks.append(None)
@@ -252,8 +279,23 @@ async def get_messages(match_id: int,my_id: int,skip: int = 0,take: int = 50):
     conversation_id = match.conversation.id
 
     # Fetch messages
+   # Check karo agar is user ne ye chat clear ki hai
+    clear_record = await db.conversationclear.find_unique(
+        where={
+            "conversationId_userId": {
+                "conversationId": conversation_id,
+                "userId": my_id
+            }
+        }
+    )
+
+    where_clause = {"conversationId": conversation_id}
+    if clear_record:
+        where_clause["createdAt"] = {"gt": clear_record.clearedAt}
+
+    # Fetch messages
     messages = await db.message.find_many(
-        where={"conversationId": conversation_id},
+        where=where_clause,
         order={"createdAt": "desc"},
         skip=skip,
         take=take,
@@ -318,27 +360,51 @@ async def send_message(data: MessageSendRequest):
     return {"message": "Message sent", "data": message}
 
 
-@router.delete("/conversations/clear/{user_id}")
-async def clear_chat(user_id: int):
+class ClearChatRequest(BaseModel):
+    matchId: int
+    userId: int
+
+@router.delete("/conversations/clear")
+async def clear_chat(data: ClearChatRequest):
     try:
-        # Mark messages as deleted for this user
-        updated_messages = await db.message.update_many(
-            where={"senderId": user_id},
-            data={"isDelete": True}
+        match = await db.match.find_unique(
+            where={"id": data.matchId},
+            include={"conversation": True}
         )
 
-        return {
-            "status":200,
-            "message": "Chat cleared successfully",
-        }
+        if not match:
+            raise HTTPException(status_code=404, detail="Match not found")
+
+        if not match.conversation:
+            return {"status": 200, "message": "No conversation to clear"}
+
+        conversation_id = match.conversation.id
+
+        await db.conversationclear.upsert(
+            where={
+                "conversationId_userId": {
+                    "conversationId": conversation_id,
+                    "userId": data.userId
+                }
+            },
+            data={
+                "create": {
+                    "conversationId": conversation_id,
+                    "userId": data.userId,
+                    "clearedAt": datetime.now(timezone.utc)
+                },
+                "update": {
+                    "clearedAt": datetime.now(timezone.utc)
+                }
+            }
+        )
+
+        return {"status": 200, "message": "Chat cleared successfully"}
 
     except HTTPException:
         raise
-    
     except Exception as e:
-        raise HTTPException(status_code=500,detail=f"Failed to clear chat: {str(e)}")
-
-
+        raise HTTPException(status_code=500, detail=f"Failed to clear chat: {str(e)}")
 
 @router.post("/upload/audio")
 async def upload_audio(file: UploadFile = File(...)):
